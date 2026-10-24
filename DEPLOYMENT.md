@@ -22,7 +22,7 @@ Render hosts the Node.js API server and connects to your Neon PostgreSQL cloud d
 | **Branch** | `main` | Default branch |
 | **Root Directory** | `backend` | **CRITICAL**: Tells Render your API code is in the `backend` folder |
 | **Runtime** | `Node` | |
-| **Build Command** | `npm install && npm run build` | Generates Prisma client and compiles TypeScript to `dist` |
+| **Build Command** | `npm install --include=dev && npm run build` | Ensures TypeScript and `@types/*` packages are installed and compiled |
 | **Start Command** | `npm start` | Runs `node dist/index.js` |
 | **Instance Type** | `Free` | |
 
