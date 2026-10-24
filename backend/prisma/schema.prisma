@@ -1,0 +1,193 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("ADMIN") // ADMIN, DISPATCHER, SALES, ACCOUNTANT
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id            String      @id @default(uuid())
+  name          String
+  sku           String      @unique
+  category      String      // JAR_20L, BOTTLE_1L, BOTTLE_500ML, CUP_250ML, DISPENSER, OTHER
+  unit          String      // Jar, Box, Case, Unit
+  defaultPrice  Float
+  defaultCost   Float
+  isReturnable  Boolean     @default(false)
+  depositAmount Float       @default(0.0)
+  currentStock  Int         @default(0)
+  minStockAlert Int         @default(20)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  batches       Batch[]
+  orderItems    OrderItem[]
+}
+
+model Batch {
+  id                  String      @id @default(uuid())
+  batchNumber         String      @unique
+  productId           String
+  product             Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplierName        String
+  purchaseDate        DateTime
+  mfgDate             DateTime
+  expiryDate          DateTime?
+  quantityReceived    Int
+  quantityRemaining   Int
+  purchaseCostPerUnit Float
+  transportCostTotal  Float       @default(0.0)
+  totalCost           Float
+  landedCostPerUnit   Float
+  notes               String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  orderItems          OrderItem[]
+}
+
+model Client {
+  id              String           @id @default(uuid())
+  name            String
+  clientType      String           // HOTEL, RESTAURANT, RESORT, CAFE, CORPORATE, EVENT_BANQUET
+  contactPerson   String
+  phone           String
+  email           String?
+  address         String
+  deliveryZone    String?
+  paymentTerms    String           @default("DAYS_15") // IMMEDIATE_CASH, DAYS_7, DAYS_15, DAYS_30
+  creditLimit     Float            @default(50000.0)
+  currentBalance  Float            @default(0.0)
+  emptyJarsHeld   Int              @default(0)
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  orders          Order[]
+  deliveries      Delivery[]
+  jarTransactions JarTransaction[]
+  payments        Payment[]
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  invoiceNumber  String      @unique
+  clientId       String
+  client         Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  orderDate      DateTime    @default(now())
+  subtotal       Float
+  taxAmount      Float       @default(0.0)
+  discountAmount Float       @default(0.0)
+  totalAmount    Float
+  totalCost      Float
+  grossProfit    Float
+  grossMarginPct Float
+  paymentStatus  String      @default("PENDING") // PAID, PARTIAL, PENDING, OVERDUE
+  paidAmount     Float       @default(0.0)
+  paymentMethod  String      @default("CREDIT")  // CASH, UPI, BANK_TRANSFER, CHEQUE, CREDIT
+  notes          String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  items          OrderItem[]
+  delivery       Delivery?
+  payments       Payment[]
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  batchId    String?
+  batch      Batch?   @relation(fields: [batchId], references: [id])
+  quantity   Int
+  unitPrice  Float
+  unitCost   Float
+  totalPrice Float
+  totalCost  Float
+  profit     Float
+}
+
+model Delivery {
+  id                  String          @id @default(uuid())
+  challanNumber       String          @unique
+  orderId             String          @unique
+  order               Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  clientId            String
+  client              Client          @relation(fields: [clientId], references: [id])
+  scheduledDate       DateTime
+  deliveredDate       DateTime?
+  status              String          @default("SCHEDULED") // SCHEDULED, OUT_FOR_DELIVERY, DELIVERED, CANCELLED
+  driverName          String
+  driverPhone         String?
+  vehicleNumber       String
+  deliveryAddress     String
+  recipientName       String?
+  recipientPhone      String?
+  notes               String?
+  emptyJarsDelivered  Int             @default(0)
+  emptyJarsCollected  Int             @default(0)
+  emptyJarsDamaged    Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  jarTransaction      JarTransaction?
+}
+
+model JarTransaction {
+  id              String    @id @default(uuid())
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  deliveryId      String?   @unique
+  delivery        Delivery? @relation(fields: [deliveryId], references: [id])
+  date            DateTime  @default(now())
+  transactionType String    // DELIVERED_FULL, COLLECTED_EMPTY, DAMAGED_CLIENT, REPLACED
+  jarsOut         Int       @default(0)
+  jarsIn          Int       @default(0)
+  netChange       Int
+  balanceAfter    Int
+  notes           String?
+  createdAt       DateTime  @default(now())
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id])
+  clientId        String
+  client          Client   @relation(fields: [clientId], references: [id])
+  amount          Float
+  paymentDate     DateTime @default(now())
+  paymentMethod   String   // CASH, UPI, BANK_TRANSFER, CHEQUE
+  referenceNumber String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model Expense {
+  id            String   @id @default(uuid())
+  expenseNumber String   @unique
+  date          DateTime @default(now())
+  category      String   // FUEL, DRIVER_WAGES, VEHICLE_MAINTENANCE, WAREHOUSE_RENT, ELECTRICITY, PACKAGING_SEALS, WATER_TESTING, MISC
+  amount        Float
+  paymentMethod String   // CASH, BANK_TRANSFER, UPI
+  paidTo        String
+  vehicleNumber String?
+  description   String
+  notes         String?
+  createdAt     DateTime @default(now())
+}
