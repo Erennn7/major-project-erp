@@ -30,15 +30,20 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
   });
 
   const handleStartDispatch = async (id: string) => {
+    // 1. Instant optimistic update (<1ms)
+    const current = deliveries.find((d) => d.id === id);
+    if (current && onDeliveryUpdated) {
+      onDeliveryUpdated({ ...current, status: 'OUT_FOR_DELIVERY' });
+    }
+
     try {
       const res = await api.updateDeliveryStatus(id, { status: 'OUT_FOR_DELIVERY' });
       if (onDeliveryUpdated && res) {
         onDeliveryUpdated(res);
-      } else {
-        onRefresh();
       }
     } catch (err: any) {
       alert('Error updating status: ' + err.message);
+      onRefresh(); // revert if failed
     }
   };
 
@@ -56,7 +61,23 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
     e.preventDefault();
     if (!activeDelivery) return;
 
-    setSubmitting(true);
+    // 1. Instant optimistic update & immediate modal close (<1ms)
+    const optimisticDel: Delivery = {
+      ...activeDelivery,
+      status: 'DELIVERED',
+      deliveredDate: new Date().toISOString(),
+      recipientName,
+      recipientPhone,
+      emptyJarsCollected: Number(emptyJarsCollected),
+      emptyJarsDamaged: Number(emptyJarsDamaged),
+      notes: deliveryNotes,
+    };
+
+    if (onDeliveryUpdated) {
+      onDeliveryUpdated(optimisticDel);
+    }
+    setIsDeliveryModalOpen(false);
+
     try {
       const res = await api.updateDeliveryStatus(activeDelivery.id, {
         status: 'DELIVERED',
@@ -67,16 +88,13 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
         emptyJarsDamaged: Number(emptyJarsDamaged),
         notes: deliveryNotes,
       });
-      setIsDeliveryModalOpen(false);
+
       if (onDeliveryUpdated && res) {
         onDeliveryUpdated(res);
-      } else {
-        onRefresh();
       }
     } catch (err: any) {
       alert('Failed to mark delivery: ' + err.message);
-    } finally {
-      setSubmitting(false);
+      onRefresh(); // revert
     }
   };
 

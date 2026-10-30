@@ -15,6 +15,8 @@ model User {
   role      String   @default("ADMIN") // ADMIN, DISPATCHER, SALES, ACCOUNTANT
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([role])
 }
 
 model Product {
@@ -34,6 +36,10 @@ model Product {
 
   batches       Batch[]
   orderItems    OrderItem[]
+
+  @@index([category])
+  @@index([isReturnable])
+  @@index([currentStock])
 }
 
 model Batch {
@@ -56,6 +62,10 @@ model Batch {
   updatedAt           DateTime    @updatedAt
 
   orderItems          OrderItem[]
+
+  @@index([productId])
+  @@index([purchaseDate])
+  @@index([productId, quantityRemaining, purchaseDate])
 }
 
 model Client {
@@ -79,6 +89,10 @@ model Client {
   deliveries      Delivery[]
   jarTransactions JarTransaction[]
   payments        Payment[]
+
+  @@index([clientType])
+  @@index([currentBalance])
+  @@index([name])
 }
 
 model Order {
@@ -104,6 +118,12 @@ model Order {
   items          OrderItem[]
   delivery       Delivery?
   payments       Payment[]
+
+  @@index([clientId])
+  @@index([orderDate])
+  @@index([paymentStatus])
+  @@index([clientId, orderDate])
+  @@index([paymentStatus, orderDate])
 }
 
 model OrderItem {
@@ -120,6 +140,10 @@ model OrderItem {
   totalPrice Float
   totalCost  Float
   profit     Float
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([batchId])
 }
 
 model Delivery {
@@ -146,6 +170,12 @@ model Delivery {
   updatedAt           DateTime        @updatedAt
 
   jarTransaction      JarTransaction?
+
+  @@index([clientId])
+  @@index([status])
+  @@index([scheduledDate])
+  @@index([status, scheduledDate])
+  @@index([clientId, status])
 }
 
 model JarTransaction {
@@ -162,6 +192,10 @@ model JarTransaction {
   balanceAfter    Int
   notes           String?
   createdAt       DateTime  @default(now())
+
+  @@index([clientId])
+  @@index([date])
+  @@index([clientId, date])
 }
 
 model Payment {
@@ -176,6 +210,11 @@ model Payment {
   referenceNumber String?
   notes           String?
   createdAt       DateTime @default(now())
+
+  @@index([clientId])
+  @@index([orderId])
+  @@index([paymentDate])
+  @@index([clientId, paymentDate])
 }
 
 model Expense {
@@ -190,4 +229,8 @@ model Expense {
   description   String
   notes         String?
   createdAt     DateTime @default(now())
+
+  @@index([category])
+  @@index([date])
+  @@index([category, date])
 }

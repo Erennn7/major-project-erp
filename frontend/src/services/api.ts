@@ -46,7 +46,8 @@ export const api = {
   login: (data: any) => request<{ user: any; token: string }>('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
   register: (data: any) => request<{ user: any; token: string }>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   getMe: () => request<any>('/auth/me'),
-  // Analytics
+  // Bootstrap & Analytics
+  getBootstrap: () => request<any>('/bootstrap'),
   getAnalyticsSummary: () => request<any>('/analytics/summary'),
 
   // Products

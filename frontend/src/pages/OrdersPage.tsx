@@ -117,6 +117,75 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
       return;
     }
 
+    const client = clients.find((c) => c.id === selectedClientId);
+
+    // Build optimistic preview order so user feels 0ms response time
+    const tempOrderId = 'ord-' + Date.now();
+    const tempDeliveryId = 'del-' + Date.now();
+    const tempInvoiceNumber = `INV-${Date.now().toString().slice(-6)}`;
+    const tempChallanNumber = `DC-${Date.now().toString().slice(-6)}`;
+
+    const optimisticOrder: Order = {
+      id: tempOrderId,
+      invoiceNumber: tempInvoiceNumber,
+      clientId: selectedClientId,
+      client: client!,
+      orderDate: new Date().toISOString(),
+      subtotal: previewSubtotal,
+      taxAmount: 0,
+      discountAmount: 0,
+      totalAmount: previewSubtotal,
+      totalCost: previewCOGS,
+      grossProfit: previewGrossProfit,
+      grossMarginPct: Number(previewGrossMargin),
+      paymentStatus: Number(paidAmount) >= previewSubtotal ? 'PAID' : Number(paidAmount) > 0 ? 'PARTIAL' : 'PENDING',
+      paidAmount: Number(paidAmount),
+      paymentMethod,
+      notes: orderNotes,
+      items: orderItems.map((item, idx) => {
+        const prod = products.find((p) => p.id === item.productId);
+        return {
+          id: `item-${tempOrderId}-${idx}`,
+          orderId: tempOrderId,
+          productId: item.productId,
+          product: prod!,
+          batchId: item.batchId || null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          unitCost: prod?.defaultCost || 0,
+          totalPrice: item.quantity * item.unitPrice,
+          totalCost: item.quantity * (prod?.defaultCost || 0),
+          profit: item.quantity * (item.unitPrice - (prod?.defaultCost || 0)),
+        };
+      }),
+    };
+
+    const optimisticDelivery: Delivery = {
+      id: tempDeliveryId,
+      challanNumber: tempChallanNumber,
+      orderId: tempOrderId,
+      order: optimisticOrder,
+      clientId: selectedClientId,
+      client: client!,
+      scheduledDate,
+      status: 'SCHEDULED',
+      driverName: driverName || 'Assigned Driver',
+      vehicleNumber: vehicleNumber || 'Depot Van',
+      deliveryAddress: client?.address || '',
+      emptyJarsDelivered: orderItems.reduce((acc, i) => {
+        const p = products.find((prod) => prod.id === i.productId);
+        return p?.category === 'JAR_20L' || p?.isReturnable ? acc + i.quantity : acc;
+      }, 0),
+      emptyJarsCollected: 0,
+      emptyJarsDamaged: 0,
+    };
+
+    // Close modal instantly (<1ms perceived latency)
+    onCloseCreateModal();
+    if (onOrderCreated) {
+      onOrderCreated(optimisticOrder, optimisticDelivery);
+    }
+
     setSubmitting(true);
     try {
       const res = await api.createOrder({
@@ -130,14 +199,12 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
         notes: orderNotes,
       });
 
-      onCloseCreateModal();
       if (onOrderCreated && res?.order) {
         onOrderCreated(res.order, res.delivery);
-      } else {
-        onRefresh();
       }
     } catch (err: any) {
       alert('Order generation failed: ' + err.message);
+      onRefresh(); // revert
     } finally {
       setSubmitting(false);
     }

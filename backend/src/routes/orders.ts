@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const ordersRouter = Router();
 
@@ -8,17 +9,19 @@ ordersRouter.get('/', async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
       include: {
-        client: true,
+        client: {
+          select: { id: true, name: true, phone: true, address: true, emptyJarsHeld: true, currentBalance: true },
+        },
         items: {
           include: {
-            product: true,
-            batch: true,
+            product: {
+              select: { id: true, name: true, category: true, unit: true },
+            },
           },
         },
-        delivery: true,
-        payments: true,
       },
       orderBy: { orderDate: 'desc' },
+      take: 100,
     });
     res.json({ success: true, data: orders });
   } catch (error: any) {
@@ -206,10 +209,7 @@ ordersRouter.post('/', async (req, res) => {
           },
         },
         include: {
-          client: true,
-          items: {
-            include: { product: true, batch: true },
-          },
+          items: true,
         },
       });
 
@@ -256,17 +256,31 @@ ordersRouter.post('/', async (req, res) => {
           emptyJarsCollected: 0,
           emptyJarsDamaged: 0,
         },
-        include: {
-          client: true,
-        },
       });
 
-      return { order: newOrder, delivery };
+      // Attach client & product objects in memory (avoids 5 extra roundtrips across the network)
+      const populatedOrder: any = {
+        ...newOrder,
+        client,
+        items: newOrder.items.map((item) => ({
+          ...item,
+          product: productMap.get(item.productId),
+          batch: item.batchId ? batchMap.get(item.batchId) : null,
+        })),
+      };
+
+      const populatedDelivery: any = {
+        ...delivery,
+        client,
+      };
+
+      return { order: populatedOrder, delivery: populatedDelivery };
     }, {
       maxWait: 10000,
       timeout: 30000,
     });
 
+    invalidateBootstrapCache();
     res.status(201).json({ success: true, data: result });
   } catch (error: any) {
     console.error('Order creation error:', error);
@@ -329,6 +343,7 @@ ordersRouter.put('/:id/payment', async (req, res) => {
       timeout: 30000,
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, data: updated });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const deliveriesRouter = Router();
 
@@ -29,6 +30,7 @@ deliveriesRouter.get('/', async (req, res) => {
         },
       },
       orderBy: { scheduledDate: 'desc' },
+      take: 100,
     });
 
     res.json({ success: true, data: deliveries });
@@ -92,64 +94,75 @@ deliveriesRouter.put('/:id/status', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Delivery not found' });
     }
 
+    const deliveryUpdate: any = {
+      ...(status && { status }),
+      ...(notes !== undefined && { notes }),
+      ...(driverName && { driverName }),
+      ...(vehicleNumber && { vehicleNumber }),
+      emptyJarsDelivered: emptyJarsDelivered !== undefined ? Number(emptyJarsDelivered) : existing.emptyJarsDelivered,
+      emptyJarsCollected: emptyJarsCollected !== undefined ? Number(emptyJarsCollected) : existing.emptyJarsCollected,
+      emptyJarsDamaged: emptyJarsDamaged !== undefined ? Number(emptyJarsDamaged) : existing.emptyJarsDamaged,
+    };
+
+    // Fast-path: If marking OUT_FOR_DELIVERY, SCHEDULED, or CANCELLED, no jar accounting needed
+    if (status !== 'DELIVERED') {
+      const updated = await prisma.delivery.update({
+        where: { id },
+        data: deliveryUpdate,
+        include: { client: true },
+      });
+      invalidateBootstrapCache();
+      return res.json({ success: true, data: updated });
+    }
+
+    // DELIVERED status requires jar transaction update
+    deliveryUpdate.deliveredDate = deliveredDate ? new Date(deliveredDate) : new Date();
+    if (recipientName) deliveryUpdate.recipientName = recipientName;
+    if (recipientPhone) deliveryUpdate.recipientPhone = recipientPhone;
+
     const updated = await prisma.$transaction(async (tx) => {
-      const deliveredCount = emptyJarsDelivered !== undefined ? Number(emptyJarsDelivered) : existing.emptyJarsDelivered;
-      const collectedCount = emptyJarsCollected !== undefined ? Number(emptyJarsCollected) : existing.emptyJarsCollected;
-      const damagedCount = emptyJarsDamaged !== undefined ? Number(emptyJarsDamaged) : existing.emptyJarsDamaged;
+      const deliveredCount = deliveryUpdate.emptyJarsDelivered;
+      const collectedCount = deliveryUpdate.emptyJarsCollected;
+      const damagedCount = deliveryUpdate.emptyJarsDamaged;
 
-      const deliveryUpdate: any = {
-        ...(status && { status }),
-        ...(notes !== undefined && { notes }),
-        ...(driverName && { driverName }),
-        ...(vehicleNumber && { vehicleNumber }),
-        emptyJarsDelivered: deliveredCount,
-        emptyJarsCollected: collectedCount,
-        emptyJarsDamaged: damagedCount,
-      };
+      // If newly marked DELIVERED and wasn't already delivered
+      if (existing.status !== 'DELIVERED') {
+        const netJarChange = deliveredCount - collectedCount;
+        const newClientJarBalance = Math.max(0, existing.client.emptyJarsHeld + netJarChange);
 
-      if (status === 'DELIVERED') {
-        deliveryUpdate.deliveredDate = deliveredDate ? new Date(deliveredDate) : new Date();
-        if (recipientName) deliveryUpdate.recipientName = recipientName;
-        if (recipientPhone) deliveryUpdate.recipientPhone = recipientPhone;
+        // Update client jar count
+        await tx.client.update({
+          where: { id: existing.clientId },
+          data: { emptyJarsHeld: newClientJarBalance },
+        });
 
-        // If newly marked DELIVERED and wasn't already delivered
-        if (existing.status !== 'DELIVERED') {
-          const netJarChange = deliveredCount - collectedCount;
-          const newClientJarBalance = Math.max(0, existing.client.emptyJarsHeld + netJarChange);
-
-          // Update client jar count
-          await tx.client.update({
-            where: { id: existing.clientId },
-            data: { emptyJarsHeld: newClientJarBalance },
-          });
-
-          // Create Jar transaction
-          await tx.jarTransaction.create({
-            data: {
-              clientId: existing.clientId,
-              deliveryId: existing.id,
-              date: deliveryUpdate.deliveredDate,
-              transactionType: 'DELIVERED_FULL',
-              jarsOut: deliveredCount,
-              jarsIn: collectedCount,
-              netChange: netJarChange,
-              balanceAfter: newClientJarBalance,
-              notes: `Delivery ${existing.challanNumber}: Delivered ${deliveredCount} jars, collected ${collectedCount} empty cans (${damagedCount} damaged).`,
-            },
-          });
-        }
+        // Create Jar transaction
+        await tx.jarTransaction.create({
+          data: {
+            clientId: existing.clientId,
+            deliveryId: existing.id,
+            date: deliveryUpdate.deliveredDate,
+            transactionType: 'DELIVERED_FULL',
+            jarsOut: deliveredCount,
+            jarsIn: collectedCount,
+            netChange: netJarChange,
+            balanceAfter: newClientJarBalance,
+            notes: `Delivery ${existing.challanNumber}: Delivered ${deliveredCount} jars, collected ${collectedCount} empty cans (${damagedCount} damaged).`,
+          },
+        });
       }
 
       return tx.delivery.update({
         where: { id },
         data: deliveryUpdate,
-        include: { client: true, order: true },
+        include: { client: true },
       });
     }, {
       maxWait: 10000,
       timeout: 30000,
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, data: updated });
   } catch (error: any) {
     console.error('Delivery status update error:', error);

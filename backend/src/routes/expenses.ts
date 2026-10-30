@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const expensesRouter = Router();
 
@@ -55,6 +56,7 @@ expensesRouter.post('/', async (req, res) => {
       },
     });
 
+    invalidateBootstrapCache();
     res.status(201).json({ success: true, data: expense });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -66,6 +68,7 @@ expensesRouter.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.expense.delete({ where: { id } });
+    invalidateBootstrapCache();
     res.json({ success: true, message: 'Expense deleted' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });

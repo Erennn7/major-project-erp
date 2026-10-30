@@ -41,22 +41,15 @@ export const App: React.FC = () => {
     }
 
     try {
-      const [analyticsData, deliveriesData, ordersData, clientsData, productsData, batchesData] =
-        await Promise.all([
-          api.getAnalyticsSummary(),
-          api.getDeliveries(),
-          api.getOrders(),
-          api.getClients(),
-          api.getProducts(),
-          api.getBatches(),
-        ]);
-
-      setAnalytics(analyticsData);
-      setDeliveries(deliveriesData);
-      setOrders(ordersData);
-      setClients(clientsData);
-      setProducts(productsData);
-      setBatches(batchesData);
+      const data = await api.getBootstrap();
+      if (data) {
+        if (data.analytics) setAnalytics(data.analytics);
+        if (data.deliveries) setDeliveries(data.deliveries);
+        if (data.orders) setOrders(data.orders);
+        if (data.clients) setClients(data.clients);
+        if (data.products) setProducts(data.products);
+        if (data.batches) setBatches(data.batches);
+      }
     } catch (err) {
       console.error('Error refreshing app data:', err);
     } finally {
@@ -104,10 +97,24 @@ export const App: React.FC = () => {
 
   // Instant optimistic handlers
   const handleOrderCreated = (newOrder: Order, newDelivery?: Delivery) => {
-    setOrders((prev) => [newOrder, ...prev]);
+    setOrders((prev) => {
+      const exists = prev.some((o) => o.id === newOrder.id || o.invoiceNumber === newOrder.invoiceNumber);
+      if (exists) {
+        return prev.map((o) => (o.invoiceNumber === newOrder.invoiceNumber ? newOrder : o));
+      }
+      return [newOrder, ...prev];
+    });
+
     if (newDelivery) {
-      setDeliveries((prev) => [newDelivery, ...prev]);
+      setDeliveries((prev) => {
+        const exists = prev.some((d) => d.id === newDelivery.id || d.challanNumber === newDelivery.challanNumber);
+        if (exists) {
+          return prev.map((d) => (d.challanNumber === newDelivery.challanNumber ? newDelivery : d));
+        }
+        return [newDelivery, ...prev];
+      });
     }
+
     // Update client balance locally
     setClients((prev) =>
       prev.map((c) =>
@@ -116,8 +123,6 @@ export const App: React.FC = () => {
           : c
       )
     );
-    // Background silent refresh
-    refreshData(true);
   };
 
   const handleBatchCreated = (newBatch: Batch) => {

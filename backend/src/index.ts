@@ -10,6 +10,7 @@ import { deliveriesRouter } from './routes/deliveries';
 import { jarsRouter } from './routes/jars';
 import { expensesRouter } from './routes/expenses';
 import { paymentsRouter } from './routes/payments';
+import { bootstrapRouter } from './routes/bootstrap';
 
 import { authRouter } from './routes/auth';
 
@@ -49,6 +50,7 @@ app.use('/api/deliveries', deliveriesRouter);
 app.use('/api/jars', jarsRouter);
 app.use('/api/expenses', expensesRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/bootstrap', bootstrapRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({

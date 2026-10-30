@@ -7,17 +7,68 @@ analyticsRouter.get('/summary', async (req, res) => {
   try {
     const [orders, expenses, clients, batches, products, deliveries] = await Promise.all([
       prisma.order.findMany({
-        include: {
-          items: true,
-          client: true,
+        select: {
+          id: true,
+          totalAmount: true,
+          totalCost: true,
+          grossProfit: true,
+          orderDate: true,
+          paymentStatus: true,
+          paidAmount: true,
+          clientId: true,
+          client: {
+            select: {
+              name: true,
+              emptyJarsHeld: true,
+              currentBalance: true,
+            },
+          },
+          items: {
+            select: {
+              productId: true,
+              totalPrice: true,
+              quantity: true,
+              profit: true,
+            },
+          },
         },
         orderBy: { orderDate: 'desc' },
       }),
-      prisma.expense.findMany(),
-      prisma.client.findMany(),
-      prisma.batch.findMany(),
-      prisma.product.findMany(),
-      prisma.delivery.findMany(),
+      prisma.expense.findMany({
+        select: {
+          id: true,
+          amount: true,
+          category: true,
+          date: true,
+        },
+      }),
+      prisma.client.findMany({
+        select: {
+          id: true,
+          currentBalance: true,
+          emptyJarsHeld: true,
+        },
+      }),
+      prisma.batch.findMany({
+        select: {
+          id: true,
+          quantityRemaining: true,
+          landedCostPerUnit: true,
+        },
+      }),
+      prisma.product.findMany({
+        select: {
+          id: true,
+          category: true,
+          currentStock: true,
+        },
+      }),
+      prisma.delivery.findMany({
+        select: {
+          id: true,
+          status: true,
+        },
+      }),
     ]);
 
     // Financial totals
