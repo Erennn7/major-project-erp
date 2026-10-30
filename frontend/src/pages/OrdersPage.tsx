@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Printer, DollarSign, X, CheckCircle2 } from 'lucide-react';
+import { Plus, Printer, DollarSign, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { api } from '../services/api';
 import type { Order, Client, Product, Batch, Delivery } from '../types';
@@ -40,7 +40,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
     {
       productId: products[0]?.id || '',
       batchId: '',
-      quantity: 50,
+      quantity: 10,
       unitPrice: products[0]?.defaultPrice || 80,
     },
   ]);
@@ -50,6 +50,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState('CREDIT');
   const [orderNotes, setOrderNotes] = useState('');
+  const [overrideCreditLimit, setOverrideCreditLimit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Pay Modal State
@@ -62,31 +63,80 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
     return o.paymentStatus === filter;
   });
 
-  // Calculate live preview metrics for the new order
+  // Calculate aggregated quantities per product across all line items
+  const aggregatedQtyPerProduct: Record<string, number> = {};
   let previewSubtotal = 0;
   let previewCOGS = 0;
 
   for (const item of orderItems) {
+    if (item.productId) {
+      aggregatedQtyPerProduct[item.productId] =
+        (aggregatedQtyPerProduct[item.productId] || 0) + (Number(item.quantity) || 0);
+    }
     const prod = products.find((p) => p.id === item.productId);
     const batch = batches.find((b) => b.id === item.batchId);
     const unitCost = batch ? batch.landedCostPerUnit : prod?.defaultCost || 0;
-    const itemTotal = item.quantity * item.unitPrice;
-    const itemCost = item.quantity * unitCost;
+    const itemTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+    const itemCost = (Number(item.quantity) || 0) * unitCost;
     previewSubtotal += itemTotal;
     previewCOGS += itemCost;
   }
 
-  const previewGrossProfit = previewSubtotal - previewCOGS;
+  previewSubtotal = Number(previewSubtotal.toFixed(2));
+  previewCOGS = Number(previewCOGS.toFixed(2));
+  const previewGrossProfit = Number((previewSubtotal - previewCOGS).toFixed(2));
   const previewGrossMargin = previewSubtotal > 0 ? ((previewGrossProfit / previewSubtotal) * 100).toFixed(1) : '0';
 
+  const selectedClient = clients.find((c) => c.id === selectedClientId);
+  const unpaidDue = Math.max(0, Number((previewSubtotal - (Number(paidAmount) || 0)).toFixed(2)));
+  const projectedBalance = selectedClient
+    ? Number((selectedClient.currentBalance + unpaidDue).toFixed(2))
+    : 0;
+  const isCreditLimitExceeded = Boolean(
+    selectedClient && selectedClient.creditLimit > 0 && projectedBalance > selectedClient.creditLimit
+  );
+
+  // Comprehensive Form Validation checks
+  const hasInvalidQuantities = orderItems.some(
+    (it) => !it.quantity || it.quantity <= 0 || !Number.isInteger(Number(it.quantity))
+  );
+
+  const hasStockErrors = orderItems.some((it) => {
+    const prod = products.find((p) => p.id === it.productId);
+    const prodStock = prod ? prod.currentStock : 0;
+    const totalRequested = aggregatedQtyPerProduct[it.productId] || 0;
+    const selectedBatch = batches.find((b) => b.id === it.batchId);
+    return prodStock < totalRequested || (selectedBatch && Number(it.quantity) > selectedBatch.quantityRemaining);
+  });
+
+  const hasPaymentErrors = Number(paidAmount) < 0 || Number(paidAmount) > previewSubtotal;
+  const isCreditBlocked = isCreditLimitExceeded && !overrideCreditLimit;
+
+  let formValidationError: string | null = null;
+  if (!selectedClientId) {
+    formValidationError = 'Please choose a client hotel / restaurant.';
+  } else if (orderItems.length === 0) {
+    formValidationError = 'At least one product line item is required.';
+  } else if (hasInvalidQuantities) {
+    formValidationError = 'All product quantities must be whole positive numbers.';
+  } else if (hasStockErrors) {
+    formValidationError = 'Requested quantities exceed available stock in depot. Adjust order amounts.';
+  } else if (hasPaymentErrors) {
+    formValidationError = 'Initial payment amount cannot be negative or exceed the invoice total.';
+  } else if (isCreditBlocked) {
+    formValidationError = `Client credit limit exceeded by ₹${(projectedBalance - (selectedClient?.creditLimit || 0)).toLocaleString()}. Check authorization to proceed.`;
+  }
+
   const handleAddItem = () => {
+    // Pick the first available product with stock > 0 if possible
+    const availableProd = products.find((p) => p.currentStock > 0) || products[0];
     setOrderItems([
       ...orderItems,
       {
-        productId: products[0]?.id || '',
+        productId: availableProd?.id || '',
         batchId: '',
-        quantity: 20,
-        unitPrice: products[0]?.defaultPrice || 80,
+        quantity: Math.min(20, Math.max(1, availableProd?.currentStock || 1)),
+        unitPrice: availableProd?.defaultPrice || 80,
       },
     ]);
   };
@@ -104,6 +154,9 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
       if (prod) {
         item.unitPrice = prod.defaultPrice;
         item.batchId = ''; // reset batch
+        if (prod.currentStock > 0 && item.quantity > prod.currentStock) {
+          item.quantity = prod.currentStock;
+        }
       }
     }
     updated[index] = item;
@@ -112,8 +165,9 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
 
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClientId) {
-      alert('Please select a hotel / client.');
+
+    if (formValidationError) {
+      alert(formValidationError);
       return;
     }
 
@@ -197,6 +251,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
         paidAmount: Number(paidAmount),
         paymentMethod,
         notes: orderNotes,
+        overrideCreditLimit,
       });
 
       if (onOrderCreated && res?.order) {
@@ -212,7 +267,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
 
   const handleOpenPayModal = (order: Order) => {
     setSelectedOrder(order);
-    const pending = Math.max(0, order.totalAmount - order.paidAmount);
+    const pending = Math.max(0, Number((order.totalAmount - order.paidAmount).toFixed(2)));
     setPaymentInputAmount(pending);
     setIsPayModalOpen(true);
   };
@@ -220,6 +275,16 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOrder) return;
+
+    const remainingDue = Number((selectedOrder.totalAmount - selectedOrder.paidAmount).toFixed(2));
+    if (paymentInputAmount <= 0) {
+      alert('Payment amount must be greater than zero.');
+      return;
+    }
+    if (paymentInputAmount > remainingDue) {
+      alert(`Payment amount (₹${paymentInputAmount}) exceeds remaining invoice due of ₹${remainingDue}.`);
+      return;
+    }
 
     try {
       await api.recordOrderPayment(selectedOrder.id, {
@@ -409,93 +474,142 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {orderItems.map((item, idx) => {
                       const prod = products.find((p) => p.id === item.productId);
                       const availableBatches = batches.filter(
                         (b) => b.productId === item.productId && b.quantityRemaining > 0
                       );
+                      const prodStock = prod ? prod.currentStock : 0;
+                      const selectedBatch = batches.find((b) => b.id === item.batchId);
+                      const totalReqForProd = aggregatedQtyPerProduct[item.productId] || 0;
+
+                      const isOutOfStock = prodStock <= 0;
+                      const isLineExceeding = Number(item.quantity) > prodStock;
+                      const isTotalExceeding = totalReqForProd > prodStock;
+                      const isBatchExceeding = selectedBatch
+                        ? Number(item.quantity) > selectedBatch.quantityRemaining
+                        : false;
+                      const hasStockError = isOutOfStock || isLineExceeding || isTotalExceeding || isBatchExceeding;
 
                       return (
                         <div
                           key={idx}
                           style={{
-                            display: 'grid',
-                            gridTemplateColumns: '2fr 2fr 1fr 1fr auto',
-                            gap: '8px',
-                            alignItems: 'end',
-                            padding: '8px',
+                            padding: '10px',
                             backgroundColor: 'var(--bg-card)',
-                            border: '1px solid var(--border)',
+                            border: hasStockError ? '1px solid var(--danger-border)' : '1px solid var(--border)',
                             borderRadius: '4px',
                           }}
                         >
-                          <div className="form-group">
-                            <label className="form-label">Product</label>
-                            <select
-                              className="form-select"
-                              value={item.productId}
-                              onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
-                              required
-                            >
-                              {products.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} (Stock: {p.currentStock})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="form-group">
-                            <label className="form-label">Batch (FIFO Landed Cost)</label>
-                            <select
-                              className="form-select"
-                              value={item.batchId}
-                              onChange={(e) => handleItemChange(idx, 'batchId', e.target.value)}
-                            >
-                              <option value="">Auto FIFO (Oldest Stock)</option>
-                              {availableBatches.map((b) => (
-                                <option key={b.id} value={b.id}>
-                                  {b.batchNumber} (Rem: {b.quantityRemaining} | ₹{b.landedCostPerUnit}/u)
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="form-group">
-                            <label className="form-label">Qty</label>
-                            <input
-                              type="number"
-                              min="1"
-                              className="form-input mono"
-                              value={item.quantity}
-                              onChange={(e) => handleItemChange(idx, 'quantity', Number(e.target.value))}
-                              required
-                            />
-                          </div>
-
-                          <div className="form-group">
-                            <label className="form-label">Price (₹)</label>
-                            <input
-                              type="number"
-                              step="0.5"
-                              className="form-input mono"
-                              value={item.unitPrice}
-                              onChange={(e) => handleItemChange(idx, 'unitPrice', Number(e.target.value))}
-                              required
-                            />
-                          </div>
-
-                          <div>
-                            {orderItems.length > 1 && (
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                style={{ padding: '8px', color: 'var(--danger-text)' }}
-                                onClick={() => handleRemoveItem(idx)}
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '2fr 2fr 1fr 1fr auto',
+                              gap: '8px',
+                              alignItems: 'end',
+                            }}
+                          >
+                            <div className="form-group">
+                              <label className="form-label">Product *</label>
+                              <select
+                                className="form-select"
+                                value={item.productId}
+                                onChange={(e) => handleItemChange(idx, 'productId', e.target.value)}
+                                required
                               >
-                                <X size={14} />
-                              </button>
+                                {products.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name} {p.currentStock > 0 ? `(In Stock: ${p.currentStock})` : `[OUT OF STOCK (0)]`}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label">Batch (FIFO Landed Cost)</label>
+                              <select
+                                className="form-select"
+                                value={item.batchId}
+                                onChange={(e) => handleItemChange(idx, 'batchId', e.target.value)}
+                              >
+                                <option value="">Auto FIFO (Oldest Stock)</option>
+                                {availableBatches.map((b) => (
+                                  <option key={b.id} value={b.id}>
+                                    {b.batchNumber} (Rem: {b.quantityRemaining} | ₹{b.landedCostPerUnit}/u)
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label">Qty *</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max={Math.max(1, prodStock)}
+                                className="form-input mono"
+                                style={{
+                                  borderColor: hasStockError ? 'var(--danger-text)' : undefined,
+                                }}
+                                value={item.quantity}
+                                onChange={(e) => handleItemChange(idx, 'quantity', Number(e.target.value))}
+                                required
+                              />
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label">Price (₹) *</label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                className="form-input mono"
+                                value={item.unitPrice}
+                                onChange={(e) => handleItemChange(idx, 'unitPrice', Number(e.target.value))}
+                                required
+                              />
+                            </div>
+
+                            <div>
+                              {orderItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '8px', color: 'var(--danger-text)' }}
+                                  onClick={() => handleRemoveItem(idx)}
+                                >
+                                  <X size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inline Stock Feedback Indicators */}
+                          <div style={{ marginTop: '6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {isOutOfStock ? (
+                              <span style={{ color: 'var(--danger-text)', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                                <AlertCircle size={12} />
+                                Product is out of stock in depot (0 available). Order cannot be placed.
+                              </span>
+                            ) : isBatchExceeding ? (
+                              <span style={{ color: 'var(--danger-text)', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                                <AlertCircle size={12} />
+                                Requested {item.quantity} units, but batch {selectedBatch?.batchNumber} only has {selectedBatch?.quantityRemaining} remaining.
+                              </span>
+                            ) : isTotalExceeding ? (
+                              <span style={{ color: 'var(--danger-text)', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                                <AlertCircle size={12} />
+                                Total requested across all lines ({totalReqForProd}) exceeds depot stock ({prodStock}).
+                              </span>
+                            ) : prodStock < 20 ? (
+                              <span style={{ color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                ⚡ Low depot stock alert: Only {prodStock} units remaining.
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                ✓ Depot stock available: <strong className="mono">{prodStock}</strong> {prod?.unit || 'units'}
+                              </span>
                             )}
                           </div>
                         </div>
@@ -537,6 +651,36 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                   </div>
                 </div>
 
+                {/* Client Credit Limit Warning Card */}
+                {isCreditLimitExceeded && selectedClient && (
+                  <div
+                    style={{
+                      backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid var(--danger-border)',
+                      padding: '12px 14px',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--danger-text)', fontWeight: 600, fontSize: '13px' }}>
+                      <AlertCircle size={15} />
+                      <span>Credit Limit Warning: {selectedClient.name}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Credit Limit: <strong className="mono">₹{selectedClient.creditLimit.toLocaleString()}</strong> | 
+                      Current Dues: <span className="mono">₹{selectedClient.currentBalance.toLocaleString()}</span> | 
+                      Projected Dues: <strong className="mono" style={{ color: 'var(--danger-text)' }}>₹{projectedBalance.toLocaleString()}</strong> (Exceeds limit by ₹{(projectedBalance - selectedClient.creditLimit).toLocaleString()})
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-main)' }}>
+                      <input
+                        type="checkbox"
+                        checked={overrideCreditLimit}
+                        onChange={(e) => setOverrideCreditLimit(e.target.checked)}
+                      />
+                      <span>Authorize management credit override for this order dispatch</span>
+                    </label>
+                  </div>
+                )}
+
                 {/* Driver & Dispatch Details */}
                 <div className="grid-2">
                   <div className="form-group">
@@ -572,10 +716,16 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                       min="0"
                       max={previewSubtotal}
                       className="form-input mono"
+                      style={{ borderColor: paidAmount > previewSubtotal ? 'var(--danger-text)' : undefined }}
                       value={paidAmount}
                       onChange={(e) => setPaidAmount(Number(e.target.value))}
                       placeholder="0 for credit/due"
                     />
+                    {paidAmount > previewSubtotal && (
+                      <span style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '4px', display: 'block' }}>
+                        Paid amount cannot exceed invoice total (₹{previewSubtotal.toLocaleString()})
+                      </span>
+                    )}
                   </div>
                   <div className="form-group">
                     <label className="form-label">Payment Method</label>
@@ -603,15 +753,48 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                     placeholder="e.g. Morning delivery before banquet breakfast service"
                   />
                 </div>
+
+                {/* Validation Notice Banner */}
+                {formValidationError && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 12px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid var(--danger-border)',
+                      borderRadius: '4px',
+                      color: 'var(--danger-text)',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <AlertCircle size={14} />
+                    <span>{formValidationError}</span>
+                  </div>
+                )}
               </div>
 
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={onCloseCreateModal}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={Boolean(formValidationError) || submitting}
+                  title={formValidationError || 'Confirm and place sales order'}
+                >
                   <CheckCircle2 size={14} />
-                  <span>{submitting ? 'Generating...' : 'Confirm Order & Schedule Delivery'}</span>
+                  <span>
+                    {submitting
+                      ? 'Generating...'
+                      : hasStockErrors
+                      ? 'Cannot Fulfill: Stock Exceeded'
+                      : isCreditBlocked
+                      ? 'Credit Limit Exceeded'
+                      : 'Confirm Order & Schedule Delivery'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -648,12 +831,23 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                   <input
                     type="number"
                     min="1"
-                    max={selectedOrder.totalAmount - selectedOrder.paidAmount}
+                    max={Math.max(1, selectedOrder.totalAmount - selectedOrder.paidAmount)}
                     className="form-input mono"
+                    style={{
+                      borderColor:
+                        paymentInputAmount > (selectedOrder.totalAmount - selectedOrder.paidAmount)
+                          ? 'var(--danger-text)'
+                          : undefined,
+                    }}
                     value={paymentInputAmount}
                     onChange={(e) => setPaymentInputAmount(Number(e.target.value))}
                     required
                   />
+                  {paymentInputAmount > (selectedOrder.totalAmount - selectedOrder.paidAmount) && (
+                    <span style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '4px', display: 'block' }}>
+                      Payment cannot exceed remaining due of ₹{(selectedOrder.totalAmount - selectedOrder.paidAmount).toLocaleString()}
+                    </span>
+                  )}
                 </div>
 
                 <div className="form-group">
@@ -686,7 +880,14 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                 <button type="button" className="btn btn-secondary" onClick={() => setIsPayModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={
+                    paymentInputAmount <= 0 ||
+                    paymentInputAmount > (selectedOrder.totalAmount - selectedOrder.paidAmount)
+                  }
+                >
                   <span>Record & Clear Due</span>
                 </button>
               </div>

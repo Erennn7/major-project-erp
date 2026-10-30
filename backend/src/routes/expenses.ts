@@ -40,6 +40,11 @@ expensesRouter.post('/', async (req, res) => {
       notes,
     } = req.body;
 
+    const expAmount = Number(amount);
+    if (!expAmount || expAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Expense amount must be greater than zero.' });
+    }
+
     const expenseNumber = `EXP-${Date.now().toString().slice(-6)}`;
 
     const expense = await prisma.expense.create({
@@ -47,12 +52,12 @@ expensesRouter.post('/', async (req, res) => {
         expenseNumber,
         date: date ? new Date(date) : new Date(),
         category: category || 'MISC',
-        amount: Number(amount) || 0,
+        amount: expAmount,
         paymentMethod: paymentMethod || 'UPI',
-        paidTo: paidTo || 'Vendor',
-        vehicleNumber: vehicleNumber || null,
-        description: description || 'Operational expense',
-        notes: notes || null,
+        paidTo: paidTo?.trim() || 'Vendor',
+        vehicleNumber: vehicleNumber?.trim() || null,
+        description: description?.trim() || 'Operational expense',
+        notes: notes?.trim() || null,
       },
     });
 

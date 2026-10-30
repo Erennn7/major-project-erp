@@ -61,15 +61,28 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
     e.preventDefault();
     if (!activeDelivery) return;
 
+    if (!recipientName.trim()) {
+      alert('Please enter recipient receiver name.');
+      return;
+    }
+
+    const collected = Number(emptyJarsCollected) || 0;
+    const damaged = Number(emptyJarsDamaged) || 0;
+
+    if (damaged > collected) {
+      alert(`Damaged jars (${damaged}) cannot exceed total jars collected (${collected}).`);
+      return;
+    }
+
     // 1. Instant optimistic update & immediate modal close (<1ms)
     const optimisticDel: Delivery = {
       ...activeDelivery,
       status: 'DELIVERED',
       deliveredDate: new Date().toISOString(),
-      recipientName,
-      recipientPhone,
-      emptyJarsCollected: Number(emptyJarsCollected),
-      emptyJarsDamaged: Number(emptyJarsDamaged),
+      recipientName: recipientName.trim(),
+      recipientPhone: recipientPhone.trim(),
+      emptyJarsCollected: collected,
+      emptyJarsDamaged: damaged,
       notes: deliveryNotes,
     };
 
@@ -82,10 +95,10 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
       const res = await api.updateDeliveryStatus(activeDelivery.id, {
         status: 'DELIVERED',
         deliveredDate: new Date().toISOString(),
-        recipientName,
-        recipientPhone,
-        emptyJarsCollected: Number(emptyJarsCollected),
-        emptyJarsDamaged: Number(emptyJarsDamaged),
+        recipientName: recipientName.trim(),
+        recipientPhone: recipientPhone.trim(),
+        emptyJarsCollected: collected,
+        emptyJarsDamaged: damaged,
         notes: deliveryNotes,
       });
 
@@ -307,7 +320,7 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
                       required
                     />
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      Full jars dropped: {activeDelivery.emptyJarsDelivered}
+                      Full jars dropped on site: {activeDelivery.emptyJarsDelivered}
                     </span>
                   </div>
                   <div className="form-group">
@@ -315,10 +328,17 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
                     <input
                       type="number"
                       min="0"
+                      max={emptyJarsCollected}
+                      style={{ borderColor: emptyJarsDamaged > emptyJarsCollected ? 'var(--danger-text)' : undefined }}
                       className="form-input mono"
                       value={emptyJarsDamaged}
                       onChange={(e) => setEmptyJarsDamaged(Number(e.target.value))}
                     />
+                    {emptyJarsDamaged > emptyJarsCollected && (
+                      <span style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '4px', display: 'block' }}>
+                        Damaged jars ({emptyJarsDamaged}) cannot exceed collected ({emptyJarsCollected})
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -341,7 +361,11 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submitting || emptyJarsDamaged > emptyJarsCollected || !recipientName.trim()}
+                >
                   <CheckCircle2 size={14} />
                   <span>{submitting ? 'Updating...' : 'Confirm Delivery & Update Jars'}</span>
                 </button>

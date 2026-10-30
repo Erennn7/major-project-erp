@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const batchesRouter = Router();
 
@@ -11,6 +12,7 @@ batchesRouter.get('/', async (req, res) => {
         product: true,
       },
       orderBy: { purchaseDate: 'desc' },
+      take: 100,
     });
     res.json({ success: true, data: batches });
   } catch (error: any) {
@@ -34,14 +36,51 @@ batchesRouter.post('/', async (req, res) => {
       notes,
     } = req.body;
 
+    if (!productId || typeof productId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Product ID is required to log a batch.' });
+    }
+
     const qty = Number(quantityReceived);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return res.status(400).json({ success: false, error: 'Quantity received must be a positive whole number.' });
+    }
+
     const unitPurchaseCost = Number(purchaseCostPerUnit);
+    if (isNaN(unitPurchaseCost) || unitPurchaseCost < 0) {
+      return res.status(400).json({ success: false, error: 'Purchase cost per unit cannot be negative.' });
+    }
+
     const transport = Number(transportCostTotal) || 0;
-    const totalCost = qty * unitPurchaseCost + transport;
+    if (transport < 0) {
+      return res.status(400).json({ success: false, error: 'Transport freight cost cannot be negative.' });
+    }
+
+    const mfg = mfgDate ? new Date(mfgDate) : new Date();
+    const purchase = purchaseDate ? new Date(purchaseDate) : new Date();
+    let expiry: Date | null = null;
+
+    if (expiryDate) {
+      expiry = new Date(expiryDate);
+      if (expiry < mfg) {
+        return res.status(400).json({
+          success: false,
+          error: 'Expiry date cannot be earlier than manufacturing date.',
+        });
+      }
+    }
+
+    const totalCost = Number((qty * unitPurchaseCost + transport).toFixed(2));
     const landedCostPerUnit = qty > 0 ? Number((totalCost / qty).toFixed(2)) : unitPurchaseCost;
 
-    if (!productId) {
-      return res.status(400).json({ success: false, error: 'Product ID is required to log a batch.' });
+    const finalBatchNumber = batchNumber?.trim() || `BATCH-${Date.now().toString().slice(-6)}`;
+
+    // Check batch number uniqueness
+    const existingBatch = await prisma.batch.findUnique({ where: { batchNumber: finalBatchNumber } });
+    if (existingBatch) {
+      return res.status(400).json({
+        success: false,
+        error: `Batch number "${finalBatchNumber}" already exists. Please use a unique batch identifier.`,
+      });
     }
 
     const batch = await prisma.$transaction(async (tx) => {
@@ -52,19 +91,19 @@ batchesRouter.post('/', async (req, res) => {
 
       const newBatch = await tx.batch.create({
         data: {
-          batchNumber: batchNumber || `BATCH-${Date.now().toString().slice(-6)}`,
+          batchNumber: finalBatchNumber,
           productId: product.id,
-          supplierName: supplierName || 'Direct Bottler Plant',
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-          mfgDate: mfgDate ? new Date(mfgDate) : new Date(),
-          expiryDate: expiryDate ? new Date(expiryDate) : null,
+          supplierName: supplierName?.trim() || 'Direct Bottler Plant',
+          purchaseDate: purchase,
+          mfgDate: mfg,
+          expiryDate: expiry,
           quantityReceived: qty,
           quantityRemaining: qty,
           purchaseCostPerUnit: unitPurchaseCost,
           transportCostTotal: transport,
           totalCost,
           landedCostPerUnit,
-          notes,
+          notes: notes?.trim() || null,
         },
         include: { product: true },
       });
@@ -83,6 +122,7 @@ batchesRouter.post('/', async (req, res) => {
       timeout: 30000,
     });
 
+    invalidateBootstrapCache();
     res.status(201).json({ success: true, data: batch });
   } catch (error: any) {
     console.error('Batch creation error:', error);
@@ -99,13 +139,14 @@ batchesRouter.put('/:id', async (req, res) => {
     const batch = await prisma.batch.update({
       where: { id },
       data: {
-        ...(supplierName && { supplierName }),
-        ...(notes !== undefined && { notes }),
+        ...(supplierName && { supplierName: supplierName.trim() }),
+        ...(notes !== undefined && { notes: notes ? notes.trim() : null }),
         ...(expiryDate && { expiryDate: new Date(expiryDate) }),
       },
       include: { product: true },
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, data: batch });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -133,16 +174,17 @@ batchesRouter.delete('/:id', async (req, res) => {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Revert remaining stock from product
+      // Revert remaining stock from product safely
+      const prod = await tx.product.findUnique({ where: { id: batch.productId } });
+      const newStock = Math.max(0, (prod?.currentStock || 0) - batch.quantityRemaining);
       await tx.product.update({
         where: { id: batch.productId },
-        data: {
-          currentStock: { decrement: batch.quantityRemaining },
-        },
+        data: { currentStock: newStock },
       });
       await tx.batch.delete({ where: { id } });
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, message: 'Batch deleted and product stock adjusted' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });

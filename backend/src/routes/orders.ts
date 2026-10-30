@@ -72,13 +72,48 @@ ordersRouter.post('/', async (req, res) => {
       driverName,
       vehicleNumber,
       scheduledDate,
+      overrideCreditLimit,
     } = req.body;
 
-    if (!clientId || !items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ success: false, error: 'Client and items are required' });
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Valid Client ID is required.' });
     }
 
-    const productIds = items.map((i: any) => i.productId);
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one order line item is required.' });
+    }
+
+    // Validate each item structure & positive quantities
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (!item.productId) {
+        return res.status(400).json({ success: false, error: `Item at line ${i + 1} is missing a Product ID.` });
+      }
+      const qty = Number(item.quantity);
+      if (!Number.isInteger(qty) || qty <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Line ${i + 1}: Quantity must be a positive whole number (received ${item.quantity}).`,
+        });
+      }
+      if (item.unitPrice !== undefined && (typeof item.unitPrice !== 'number' || item.unitPrice < 0)) {
+        return res.status(400).json({
+          success: false,
+          error: `Line ${i + 1}: Unit price cannot be negative.`,
+        });
+      }
+    }
+
+    // Aggregate requested quantities per product to catch multi-line duplicates
+    const aggregatedQtyPerProduct = new Map<string, number>();
+    for (const item of items) {
+      const current = aggregatedQtyPerProduct.get(item.productId) || 0;
+      aggregatedQtyPerProduct.set(item.productId, current + Number(item.quantity));
+    }
+
+    const productIds = Array.from(aggregatedQtyPerProduct.keys());
+
+    // Fetch client, products, and available batches
     const [client, productsList, batchesList] = await Promise.all([
       prisma.client.findUnique({ where: { id: clientId } }),
       prisma.product.findMany({ where: { id: { in: productIds } } }),
@@ -89,13 +124,46 @@ ordersRouter.post('/', async (req, res) => {
     ]);
 
     if (!client) {
-      return res.status(404).json({ success: false, error: 'Client not found' });
+      return res.status(404).json({ success: false, error: 'Client not found in database.' });
     }
 
     const productMap = new Map(productsList.map((p) => [p.id, p]));
-    const batchMap = new Map(batchesList.map((b) => [b.id, b]));
 
-    // Process order in a single atomic transaction
+    // Validate that all products exist and have sufficient stock
+    for (const [productId, totalRequested] of aggregatedQtyPerProduct.entries()) {
+      const product = productMap.get(productId);
+      if (!product) {
+        return res.status(404).json({ success: false, error: `Product ID ${productId} not found.` });
+      }
+      if (product.currentStock < totalRequested) {
+        return res.status(400).json({
+          success: false,
+          error: `Insufficient stock for "${product.name}". Available in depot: ${product.currentStock}, Total requested: ${totalRequested}. Order cannot be placed.`,
+        });
+      }
+    }
+
+    // Validate specific batch assignments if provided by the user
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.batchId) {
+        const batch = batchesList.find((b) => b.id === item.batchId);
+        if (!batch) {
+          return res.status(400).json({
+            success: false,
+            error: `Line ${i + 1}: Selected batch was not found or has 0 units remaining.`,
+          });
+        }
+        if (batch.quantityRemaining < Number(item.quantity)) {
+          return res.status(400).json({
+            success: false,
+            error: `Line ${i + 1}: Selected batch ${batch.batchNumber} has only ${batch.quantityRemaining} units remaining, but ${item.quantity} requested.`,
+          });
+        }
+      }
+    }
+
+    // Process order inside an atomic transaction
     const result = await prisma.$transaction(async (tx) => {
       let orderSubtotal = 0;
       let orderTotalCost = 0;
@@ -104,22 +172,23 @@ ordersRouter.post('/', async (req, res) => {
       const batchUpdates: Promise<any>[] = [];
       const productUpdates: Promise<any>[] = [];
 
+      // Clone batchesList to safely track in-memory remaining stock across lines
+      const inMemoryBatches = batchesList.map((b) => ({ ...b }));
+
       for (const item of items) {
-        const product = productMap.get(item.productId);
-        if (!product) {
-          throw new Error(`Product ${item.productId} not found`);
-        }
-
+        const product = productMap.get(item.productId)!;
         const qty = Number(item.quantity);
-        const unitPrice = Number(item.unitPrice) || product.defaultPrice;
+        const unitPrice = item.unitPrice !== undefined && item.unitPrice !== null
+          ? Number(item.unitPrice)
+          : product.defaultPrice;
 
-        // Determine batch & landed cost
         let selectedBatchId: string | null = item.batchId || null;
         let unitCost = product.defaultCost;
 
-        if (selectedBatchId && batchMap.has(selectedBatchId)) {
-          const batch = batchMap.get(selectedBatchId)!;
+        if (selectedBatchId) {
+          const batch = inMemoryBatches.find((b) => b.id === selectedBatchId)!;
           unitCost = batch.landedCostPerUnit;
+          batch.quantityRemaining -= qty;
           batchUpdates.push(
             tx.batch.update({
               where: { id: batch.id },
@@ -127,24 +196,48 @@ ordersRouter.post('/', async (req, res) => {
             })
           );
         } else {
-          // FIFO: find earliest batch from in-memory pre-fetched list
-          const availableBatch = batchesList.find(
+          // Robust FIFO Allocation across batches
+          let remainingQtyToAllocate = qty;
+          let accumulatedBatchCost = 0;
+          let allocatedUnits = 0;
+          let primaryBatchId: string | null = null;
+
+          const availableBatchesForProduct = inMemoryBatches.filter(
             (b) => b.productId === product.id && b.quantityRemaining > 0
           );
 
-          if (availableBatch) {
-            selectedBatchId = availableBatch.id;
-            unitCost = availableBatch.landedCostPerUnit;
-            availableBatch.quantityRemaining -= qty;
+          for (const b of availableBatchesForProduct) {
+            if (remainingQtyToAllocate <= 0) break;
+
+            const deduct = Math.min(b.quantityRemaining, remainingQtyToAllocate);
+            if (!primaryBatchId) primaryBatchId = b.id;
+
+            b.quantityRemaining -= deduct;
+            remainingQtyToAllocate -= deduct;
+            accumulatedBatchCost += deduct * b.landedCostPerUnit;
+            allocatedUnits += deduct;
+
             batchUpdates.push(
               tx.batch.update({
-                where: { id: availableBatch.id },
-                data: { quantityRemaining: { decrement: qty } },
+                where: { id: b.id },
+                data: { quantityRemaining: { decrement: deduct } },
               })
             );
           }
+
+          // If unbatched stock remains (or if product had stock without batches), use product default cost
+          if (remainingQtyToAllocate > 0) {
+            accumulatedBatchCost += remainingQtyToAllocate * product.defaultCost;
+            allocatedUnits += remainingQtyToAllocate;
+          }
+
+          selectedBatchId = primaryBatchId;
+          unitCost = allocatedUnits > 0
+            ? Number((accumulatedBatchCost / allocatedUnits).toFixed(2))
+            : product.defaultCost;
         }
 
+        // Deduct product stock (guaranteed >= 0 by earlier check)
         productUpdates.push(
           tx.product.update({
             where: { id: product.id },
@@ -175,13 +268,34 @@ ordersRouter.post('/', async (req, res) => {
         });
       }
 
+      orderSubtotal = Number(orderSubtotal.toFixed(2));
+      orderTotalCost = Number(orderTotalCost.toFixed(2));
       const grossProfit = Number((orderSubtotal - orderTotalCost).toFixed(2));
       const grossMarginPct = orderSubtotal > 0 ? Number(((grossProfit / orderSubtotal) * 100).toFixed(2)) : 0;
-      const initialPaid = Number(paidAmount) || 0;
-      const status = initialPaid >= orderSubtotal ? 'PAID' : initialPaid > 0 ? 'PARTIAL' : (paymentStatus || 'PENDING');
-      const unpaidDue = Math.max(0, orderSubtotal - initialPaid);
 
-      // Run inventory updates in parallel
+      // Validate payment bounds
+      const initialPaid = Number(paidAmount) || 0;
+      if (initialPaid < 0) {
+        throw new Error('Initial paid amount cannot be negative.');
+      }
+      if (initialPaid > orderSubtotal) {
+        throw new Error(`Initial payment (₹${initialPaid}) cannot exceed order subtotal (₹${orderSubtotal}).`);
+      }
+
+      const unpaidDue = Math.max(0, Number((orderSubtotal - initialPaid).toFixed(2)));
+      const status = initialPaid >= orderSubtotal ? 'PAID' : initialPaid > 0 ? 'PARTIAL' : (paymentStatus || 'PENDING');
+
+      // Credit limit check
+      if (unpaidDue > 0 && client.creditLimit > 0) {
+        const projectedBalance = Number((client.currentBalance + unpaidDue).toFixed(2));
+        if (projectedBalance > client.creditLimit && !overrideCreditLimit) {
+          throw new Error(
+            `Credit limit exceeded for "${client.name}". Current balance: ₹${client.currentBalance.toLocaleString()}, Credit limit: ₹${client.creditLimit.toLocaleString()}. With this order, balance would become ₹${projectedBalance.toLocaleString()}. Check "Authorize credit override" to proceed.`
+          );
+        }
+      }
+
+      // Execute inventory deductions in parallel
       await Promise.all([...batchUpdates, ...productUpdates]);
 
       // Unique invoice number
@@ -213,7 +327,7 @@ ordersRouter.post('/', async (req, res) => {
         },
       });
 
-      // Update client balance
+      // Update client balance if unpaid due exists
       if (unpaidDue > 0) {
         await tx.client.update({
           where: { id: clientId },
@@ -258,14 +372,13 @@ ordersRouter.post('/', async (req, res) => {
         },
       });
 
-      // Attach client & product objects in memory (avoids 5 extra roundtrips across the network)
       const populatedOrder: any = {
         ...newOrder,
         client,
-        items: newOrder.items.map((item) => ({
-          ...item,
-          product: productMap.get(item.productId),
-          batch: item.batchId ? batchMap.get(item.batchId) : null,
+        items: newOrder.items.map((it) => ({
+          ...it,
+          product: productMap.get(it.productId),
+          batch: it.batchId ? inMemoryBatches.find((b) => b.id === it.batchId) || null : null,
         })),
       };
 
@@ -296,17 +409,33 @@ ordersRouter.put('/:id/payment', async (req, res) => {
     const payAmount = Number(amount);
 
     if (!payAmount || payAmount <= 0) {
-      return res.status(400).json({ success: false, error: 'Valid payment amount is required' });
+      return res.status(400).json({ success: false, error: 'Payment amount must be greater than zero.' });
     }
 
-    const order = await prisma.order.findUnique({ where: { id } });
+    const order = await prisma.order.findUnique({
+      where: { id },
+      include: { client: true },
+    });
+
     if (!order) {
-      return res.status(404).json({ success: false, error: 'Order not found' });
+      return res.status(404).json({ success: false, error: 'Order not found.' });
+    }
+
+    const remainingDue = Number((order.totalAmount - order.paidAmount).toFixed(2));
+    if (remainingDue <= 0) {
+      return res.status(400).json({ success: false, error: 'This invoice is already fully paid.' });
+    }
+
+    if (payAmount > remainingDue + 0.001) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment amount (₹${payAmount}) exceeds remaining invoice due of ₹${remainingDue}.`,
+      });
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      const newPaidTotal = order.paidAmount + payAmount;
-      const newStatus = newPaidTotal >= order.totalAmount ? 'PAID' : 'PARTIAL';
+      const newPaidTotal = Number((order.paidAmount + payAmount).toFixed(2));
+      const newStatus = newPaidTotal >= order.totalAmount - 0.001 ? 'PAID' : 'PARTIAL';
 
       const updatedOrder = await tx.order.update({
         where: { id },
@@ -316,11 +445,12 @@ ordersRouter.put('/:id/payment', async (req, res) => {
         },
       });
 
-      // Reduce client balance
+      // Reduce client balance without letting rounding make it negative
+      const newClientBalance = Math.max(0, Number((order.client.currentBalance - payAmount).toFixed(2)));
       await tx.client.update({
         where: { id: order.clientId },
         data: {
-          currentBalance: { decrement: payAmount },
+          currentBalance: newClientBalance,
         },
       });
 

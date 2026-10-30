@@ -78,6 +78,16 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
     e.preventDefault();
     if (!selectedClient) return;
 
+    if (payAmount <= 0) {
+      alert('Payment amount must be greater than zero.');
+      return;
+    }
+
+    if (payAmount > selectedClient.currentBalance) {
+      alert(`Payment amount (₹${payAmount}) cannot exceed client outstanding balance of ₹${selectedClient.currentBalance.toLocaleString()}.`);
+      return;
+    }
+
     try {
       await api.createPayment({
         clientId: selectedClient.id,
@@ -355,11 +365,18 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
                   <input
                     type="number"
                     min="1"
+                    max={Math.max(1, selectedClient.currentBalance)}
                     className="form-input mono"
+                    style={{ borderColor: payAmount > selectedClient.currentBalance ? 'var(--danger-text)' : undefined }}
                     value={payAmount}
                     onChange={(e) => setPayAmount(Number(e.target.value))}
                     required
                   />
+                  {payAmount > selectedClient.currentBalance && (
+                    <span style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '4px', display: 'block' }}>
+                      Payment cannot exceed client outstanding due of ₹{selectedClient.currentBalance.toLocaleString()}
+                    </span>
+                  )}
                 </div>
 
                 <div className="form-group">
@@ -392,7 +409,11 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
                 <button type="button" className="btn btn-secondary" onClick={() => setIsPayModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={payAmount <= 0 || payAmount > selectedClient.currentBalance}
+                >
                   <span>Record Payment & Update Ledger</span>
                 </button>
               </div>

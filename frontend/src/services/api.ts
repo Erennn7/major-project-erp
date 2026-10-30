@@ -55,6 +55,7 @@ export const api = {
   createProduct: (data: any) => request<any>('/products', { method: 'POST', body: JSON.stringify(data) }),
   updateProduct: (id: string, data: any) => request<any>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProduct: (id: string) => request<any>(`/products/${id}`, { method: 'DELETE' }),
+  reconcileProductStock: (id: string, data: { targetStock: number; reason?: string }) => request<any>(`/products/${id}/reconcile-stock`, { method: 'POST', body: JSON.stringify(data) }),
 
   // Batches
   getBatches: () => request<any[]>('/batches'),

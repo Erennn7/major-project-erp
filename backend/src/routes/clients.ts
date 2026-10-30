@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const clientsRouter = Router();
 
@@ -73,23 +74,37 @@ clientsRouter.post('/', async (req, res) => {
       notes,
     } = req.body;
 
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Client / Hotel name is required.' });
+    }
+
+    if (!phone || !phone.trim()) {
+      return res.status(400).json({ success: false, error: 'Contact phone number is required.' });
+    }
+
+    const limit = Number(creditLimit);
+    if (isNaN(limit) || limit < 0) {
+      return res.status(400).json({ success: false, error: 'Credit limit cannot be negative.' });
+    }
+
     const client = await prisma.client.create({
       data: {
-        name,
+        name: name.trim(),
         clientType: clientType || 'HOTEL',
-        contactPerson: contactPerson || 'F&B Manager',
-        phone,
-        email: email || null,
-        address,
-        deliveryZone: deliveryZone || 'General Zone',
+        contactPerson: contactPerson?.trim() || 'F&B Manager',
+        phone: phone.trim(),
+        email: email?.trim() || null,
+        address: address?.trim() || 'Main Campus / Premises',
+        deliveryZone: deliveryZone?.trim() || 'General Zone',
         paymentTerms: paymentTerms || 'DAYS_15',
-        creditLimit: Number(creditLimit) || 50000,
+        creditLimit: limit,
         currentBalance: 0,
         emptyJarsHeld: 0,
-        notes: notes || null,
+        notes: notes?.trim() || null,
       },
     });
 
+    invalidateBootstrapCache();
     res.status(201).json({ success: true, data: client });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -116,19 +131,20 @@ clientsRouter.put('/:id', async (req, res) => {
     const client = await prisma.client.update({
       where: { id },
       data: {
-        ...(name && { name }),
+        ...(name && { name: name.trim() }),
         ...(clientType && { clientType }),
-        ...(contactPerson && { contactPerson }),
-        ...(phone && { phone }),
-        ...(email !== undefined && { email }),
-        ...(address && { address }),
-        ...(deliveryZone !== undefined && { deliveryZone }),
+        ...(contactPerson && { contactPerson: contactPerson.trim() }),
+        ...(phone && { phone: phone.trim() }),
+        ...(email !== undefined && { email: email ? email.trim() : null }),
+        ...(address && { address: address.trim() }),
+        ...(deliveryZone !== undefined && { deliveryZone: deliveryZone ? deliveryZone.trim() : null }),
         ...(paymentTerms && { paymentTerms }),
-        ...(creditLimit !== undefined && { creditLimit: Number(creditLimit) }),
-        ...(notes !== undefined && { notes }),
+        ...(creditLimit !== undefined && { creditLimit: Math.max(0, Number(creditLimit)) }),
+        ...(notes !== undefined && { notes: notes ? notes.trim() : null }),
       },
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, data: client });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -140,6 +156,7 @@ clientsRouter.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.client.delete({ where: { id } });
+    invalidateBootstrapCache();
     res.json({ success: true, message: 'Client deleted' });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });

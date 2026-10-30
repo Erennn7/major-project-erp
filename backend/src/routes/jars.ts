@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { invalidateBootstrapCache } from './bootstrap';
 
 export const jarsRouter = Router();
 
@@ -57,13 +58,24 @@ jarsRouter.post('/adjust', async (req, res) => {
     const { clientId, type, quantity, notes } = req.body;
     const qty = Number(quantity);
 
-    if (!clientId || !qty || qty <= 0) {
-      return res.status(400).json({ success: false, error: 'Client ID and positive quantity required' });
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Client ID is required.' });
+    }
+
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return res.status(400).json({ success: false, error: 'Quantity must be a positive whole number.' });
     }
 
     const client = await prisma.client.findUnique({ where: { id: clientId } });
     if (!client) {
-      return res.status(404).json({ success: false, error: 'Client not found' });
+      return res.status(404).json({ success: false, error: 'Client not found in database.' });
+    }
+
+    if ((type === 'COLLECTED_EMPTY' || type === 'DAMAGED_LOST') && client.emptyJarsHeld <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Client "${client.name}" currently holds 0 empty jars. Cannot record collection or loss.`,
+      });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -96,7 +108,7 @@ jarsRouter.post('/adjust', async (req, res) => {
           jarsIn,
           netChange: jarsOut - jarsIn,
           balanceAfter: newBalance,
-          notes: notes || `Direct manual adjustment: ${type} ${qty} jars`,
+          notes: notes?.trim() || `Direct manual adjustment: ${type} ${qty} jars`,
         },
       });
 
@@ -106,6 +118,7 @@ jarsRouter.post('/adjust', async (req, res) => {
       timeout: 30000,
     });
 
+    invalidateBootstrapCache();
     res.json({ success: true, data: result });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });

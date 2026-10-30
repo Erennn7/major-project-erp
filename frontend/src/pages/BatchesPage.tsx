@@ -118,8 +118,24 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
 
   const handleCreateBatch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProductId || !quantityReceived || quantityReceived <= 0) {
-      alert('Please fill product and valid quantity');
+    if (!selectedProductId) {
+      alert('Please select a product.');
+      return;
+    }
+
+    const qty = Number(quantityReceived);
+    if (!qty || qty <= 0 || !Number.isInteger(qty)) {
+      alert('Quantity received must be a positive whole number.');
+      return;
+    }
+
+    if (purchaseCostPerUnit < 0 || transportCostTotal < 0) {
+      alert('Costs cannot be negative.');
+      return;
+    }
+
+    if (expiryDate && mfgDate && new Date(expiryDate) < new Date(mfgDate)) {
+      alert('Expiry date cannot be earlier than manufacturing date.');
       return;
     }
 
@@ -127,15 +143,15 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
     try {
       const res = await api.createBatch({
         productId: selectedProductId,
-        batchNumber: batchNumber || `BATCH-${Date.now().toString().slice(-6)}`,
-        supplierName,
+        batchNumber: batchNumber?.trim() || `BATCH-${Date.now().toString().slice(-6)}`,
+        supplierName: supplierName?.trim() || 'Direct Bottler Plant',
         purchaseDate,
         mfgDate,
         expiryDate: expiryDate || null,
-        quantityReceived: Number(quantityReceived),
+        quantityReceived: qty,
         purchaseCostPerUnit: Number(purchaseCostPerUnit),
         transportCostTotal: Number(transportCostTotal),
-        notes,
+        notes: notes?.trim() || null,
       });
 
       onCloseModal();
@@ -407,6 +423,7 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
                     <label className="form-label">Best Before / Expiry</label>
                     <input
                       type="date"
+                      min={mfgDate}
                       className="form-input"
                       value={expiryDate}
                       onChange={(e) => setExpiryDate(e.target.value)}

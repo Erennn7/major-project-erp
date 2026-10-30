@@ -91,17 +91,38 @@ deliveriesRouter.put('/:id/status', async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({ success: false, error: 'Delivery not found' });
+      return res.status(404).json({ success: false, error: 'Delivery challan not found.' });
+    }
+
+    if (existing.status === 'CANCELLED' && status !== 'CANCELLED') {
+      return res.status(400).json({ success: false, error: 'Cannot modify or deliver a cancelled delivery challan.' });
+    }
+
+    const collectedCount = emptyJarsCollected !== undefined
+      ? Math.max(0, Number(emptyJarsCollected))
+      : existing.emptyJarsCollected;
+    const damagedCount = emptyJarsDamaged !== undefined
+      ? Math.max(0, Number(emptyJarsDamaged))
+      : existing.emptyJarsDamaged;
+    const deliveredCount = emptyJarsDelivered !== undefined
+      ? Math.max(0, Number(emptyJarsDelivered))
+      : existing.emptyJarsDelivered;
+
+    if (damagedCount > collectedCount) {
+      return res.status(400).json({
+        success: false,
+        error: `Damaged jars (${damagedCount}) cannot exceed total jars collected (${collectedCount}).`,
+      });
     }
 
     const deliveryUpdate: any = {
       ...(status && { status }),
-      ...(notes !== undefined && { notes }),
-      ...(driverName && { driverName }),
-      ...(vehicleNumber && { vehicleNumber }),
-      emptyJarsDelivered: emptyJarsDelivered !== undefined ? Number(emptyJarsDelivered) : existing.emptyJarsDelivered,
-      emptyJarsCollected: emptyJarsCollected !== undefined ? Number(emptyJarsCollected) : existing.emptyJarsCollected,
-      emptyJarsDamaged: emptyJarsDamaged !== undefined ? Number(emptyJarsDamaged) : existing.emptyJarsDamaged,
+      ...(notes !== undefined && { notes: notes ? notes.trim() : null }),
+      ...(driverName && { driverName: driverName.trim() }),
+      ...(vehicleNumber && { vehicleNumber: vehicleNumber.trim() }),
+      emptyJarsDelivered: deliveredCount,
+      emptyJarsCollected: collectedCount,
+      emptyJarsDamaged: damagedCount,
     };
 
     // Fast-path: If marking OUT_FOR_DELIVERY, SCHEDULED, or CANCELLED, no jar accounting needed
@@ -115,16 +136,17 @@ deliveriesRouter.put('/:id/status', async (req, res) => {
       return res.json({ success: true, data: updated });
     }
 
-    // DELIVERED status requires jar transaction update
+    // DELIVERED status requires receiver sign-off & jar transaction update
+    const finalRecipient = recipientName?.trim() || existing.recipientName;
+    if (!finalRecipient) {
+      return res.status(400).json({ success: false, error: 'Recipient receiver name is required to confirm delivery.' });
+    }
+
     deliveryUpdate.deliveredDate = deliveredDate ? new Date(deliveredDate) : new Date();
-    if (recipientName) deliveryUpdate.recipientName = recipientName;
-    if (recipientPhone) deliveryUpdate.recipientPhone = recipientPhone;
+    deliveryUpdate.recipientName = finalRecipient;
+    if (recipientPhone) deliveryUpdate.recipientPhone = recipientPhone.trim();
 
     const updated = await prisma.$transaction(async (tx) => {
-      const deliveredCount = deliveryUpdate.emptyJarsDelivered;
-      const collectedCount = deliveryUpdate.emptyJarsCollected;
-      const damagedCount = deliveryUpdate.emptyJarsDamaged;
-
       // If newly marked DELIVERED and wasn't already delivered
       if (existing.status !== 'DELIVERED') {
         const netJarChange = deliveredCount - collectedCount;
