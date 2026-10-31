@@ -11,11 +11,21 @@ import {
   Droplets,
 } from 'lucide-react';
 
+import type { UserRole } from '../types';
+
+export const ROLE_ALLOWED_TABS: Record<UserRole, string[]> = {
+  ADMIN: ['overview', 'analytics', 'deliveries', 'orders', 'batches', 'clients', 'jars', 'expenses'],
+  DISPATCHER: ['overview', 'deliveries', 'jars', 'clients'],
+  SALES: ['overview', 'orders', 'clients', 'deliveries', 'jars'],
+  ACCOUNTANT: ['overview', 'analytics', 'orders', 'batches', 'clients', 'expenses'],
+};
+
 interface SidebarProps {
   currentTab: string;
   onSelectTab: (tab: string) => void;
   pendingDeliveriesCount?: number;
   unpaidOrdersCount?: number;
+  userRole?: UserRole;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -23,8 +33,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectTab,
   pendingDeliveriesCount = 0,
   unpaidOrdersCount = 0,
+  userRole = 'ADMIN',
 }) => {
-  const menuItems = [
+  const allMenuItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'analytics', label: 'Profit & Analytics', icon: TrendingUp },
     {
@@ -44,6 +55,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'jars', label: 'Empty Jar Ledger', icon: RotateCcw },
     { id: 'expenses', label: 'Operating Expenses', icon: Receipt },
   ];
+
+  const allowedTabs = ROLE_ALLOWED_TABS[userRole] || ROLE_ALLOWED_TABS.ADMIN;
+  const menuItems = allMenuItems.filter((item) => allowedTabs.includes(item.id));
 
   return (
     <aside className="app-sidebar">
@@ -76,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       <div className="sidebar-footer">
-        <span>PostgreSQL 16 • Prisma</span>
+        <span>Enterprise Edition</span>
         <span className="mono">v1.0</span>
       </div>
     </aside>

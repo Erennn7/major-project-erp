@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma';
+import { JWT_SECRET, authenticateToken } from '../middleware/auth';
 
 export const authRouter = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'aquaflow_distributor_secret_key_2026';
 
 // Register User
 authRouter.post('/register', async (req: Request, res: Response) => {
@@ -102,18 +102,10 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 });
 
 // Get Current User Profile (Token validation)
-authRouter.get('/me', async (req: Request, res: Response) => {
+authRouter.get('/me', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'Authentication token required' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded: any = jwt.verify(token, JWT_SECRET);
-
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
+      where: { id: req.user!.userId },
       select: { id: true, name: true, email: true, role: true },
     });
 
@@ -126,3 +118,4 @@ authRouter.get('/me', async (req: Request, res: Response) => {
     res.status(401).json({ success: false, error: 'Invalid or expired session token' });
   }
 });
+

@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const jarsRouter = Router();
 
-// GET jar summary and client ledger
-jarsRouter.get('/summary', async (req, res) => {
+// Base auth
+jarsRouter.use(authenticateToken);
+
+// GET jar summary and client ledger (ADMIN, DISPATCHER, SALES)
+jarsRouter.get('/summary', requireRoles('ADMIN', 'DISPATCHER', 'SALES'), async (req, res) => {
   try {
     const clients = await prisma.client.findMany({
       select: {
@@ -52,8 +56,8 @@ jarsRouter.get('/summary', async (req, res) => {
   }
 });
 
-// POST manual jar pickup or adjustment
-jarsRouter.post('/adjust', async (req, res) => {
+// POST manual jar pickup or adjustment (ADMIN & DISPATCHER)
+jarsRouter.post('/adjust', requireRoles('ADMIN', 'DISPATCHER'), async (req, res) => {
   try {
     const { clientId, type, quantity, notes } = req.body;
     const qty = Number(quantity);

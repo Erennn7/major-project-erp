@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Boxes, Calendar, Truck, X, CheckCircle2 } from 'lucide-react';
 import { api } from '../services/api';
-import type { Batch, Product } from '../types';
+import type { Batch, Product, UserRole } from '../types';
 
 interface BatchesPageProps {
   batches: Batch[];
@@ -11,6 +11,7 @@ interface BatchesPageProps {
   isOpenModal: boolean;
   onOpenModal: () => void;
   onCloseModal: () => void;
+  userRole?: UserRole;
 }
 
 export const BatchesPage: React.FC<BatchesPageProps> = ({
@@ -21,6 +22,7 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
   isOpenModal,
   onOpenModal,
   onCloseModal,
+  userRole = 'ADMIN',
 }) => {
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id || '');
   const [batchNumber, setBatchNumber] = useState('');
@@ -180,19 +182,21 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setIsAddProductModalOpen(true)}>
-            <Plus size={14} />
-            <span>Add Product</span>
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={onOpenModal}>
-            <Plus size={14} />
-            <span>Log New Procurement Batch</span>
-          </button>
-        </div>
+        {userRole === 'ADMIN' && (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setIsAddProductModalOpen(true)}>
+              <Plus size={14} />
+              <span>Add Product</span>
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={onOpenModal}>
+              <Plus size={14} />
+              <span>Log New Procurement Batch</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {products.length === 0 && (
+      {userRole === 'ADMIN' && products.length === 0 && (
         <div className="card" style={{ padding: '16px 20px', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', border: '1px dashed var(--border)' }}>
           <div>
             <div style={{ fontWeight: 600 }}>No Products in Catalog</div>
@@ -222,10 +226,10 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
                 <th>Supplier Bottler</th>
                 <th>Purchase Date</th>
                 <th>Stock Left / Total</th>
-                <th>Purchase Cost</th>
-                <th>Transport Cost</th>
-                <th>Landed Cost / Unit</th>
-                <th>Landed Valuation</th>
+                {userRole !== 'DISPATCHER' && <th>Purchase Cost</th>}
+                {userRole !== 'DISPATCHER' && <th>Transport Cost</th>}
+                {userRole !== 'DISPATCHER' && <th>Landed Cost / Unit</th>}
+                {userRole !== 'DISPATCHER' && <th>Landed Valuation</th>}
                 <th>Expiry</th>
               </tr>
             </thead>
@@ -250,14 +254,22 @@ export const BatchesPage: React.FC<BatchesPageProps> = ({
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{stockPct}% remaining</div>
                     </td>
-                    <td className="mono">₹{b.purchaseCostPerUnit.toFixed(2)}</td>
-                    <td className="mono">₹{b.transportCostTotal.toLocaleString()}</td>
-                    <td className="mono" style={{ fontWeight: 600, color: 'var(--info-text)' }}>
-                      ₹{b.landedCostPerUnit.toFixed(2)}
-                    </td>
-                    <td className="mono" style={{ fontWeight: 600 }}>
-                      ₹{(b.quantityRemaining * b.landedCostPerUnit).toLocaleString()}
-                    </td>
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono">₹{b.purchaseCostPerUnit.toFixed(2)}</td>
+                    )}
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono">₹{b.transportCostTotal.toLocaleString()}</td>
+                    )}
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono" style={{ fontWeight: 600, color: 'var(--info-text)' }}>
+                        ₹{b.landedCostPerUnit.toFixed(2)}
+                      </td>
+                    )}
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono" style={{ fontWeight: 600 }}>
+                        ₹{(b.quantityRemaining * b.landedCostPerUnit).toLocaleString()}
+                      </td>
+                    )}
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                       {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : 'N/A'}
                     </td>

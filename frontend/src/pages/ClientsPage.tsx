@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import { Plus, DollarSign, Building2, Phone, MapPin, X, CheckCircle2, History } from 'lucide-react';
 import { api } from '../services/api';
-import type { Client } from '../types';
+import type { Client, UserRole } from '../types';
 
 interface ClientsPageProps {
   clients: Client[];
   onRefresh: () => void;
   onClientCreated?: (newClient: Client) => void;
   onOpenNewOrderForClient?: (clientId: string) => void;
+  userRole?: UserRole;
 }
 
-export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, onClientCreated }) => {
+export const ClientsPage: React.FC<ClientsPageProps> = ({
+  clients,
+  onRefresh,
+  onClientCreated,
+  userRole = 'ADMIN',
+}) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -117,10 +123,12 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
           </p>
         </div>
 
-        <button className="btn btn-primary btn-sm" onClick={() => setIsAddModalOpen(true)}>
-          <Plus size={14} />
-          <span>Add New Hotel / Client</span>
-        </button>
+        {(userRole === 'ADMIN' || userRole === 'SALES') && (
+          <button className="btn btn-primary btn-sm" onClick={() => setIsAddModalOpen(true)}>
+            <Plus size={14} />
+            <span>Add New Hotel / Client</span>
+          </button>
+        )}
       </div>
 
       {/* Clients Table */}
@@ -134,8 +142,8 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
                 <th>Contact & Phone</th>
                 <th>Delivery Zone</th>
                 <th>Payment Terms</th>
-                <th>Credit Limit</th>
-                <th>Outstanding Due</th>
+                {userRole !== 'DISPATCHER' && <th>Credit Limit</th>}
+                {userRole !== 'DISPATCHER' && <th>Outstanding Due</th>}
                 <th>Empty Jars Held</th>
                 <th>Actions</th>
               </tr>
@@ -161,16 +169,20 @@ export const ClientsPage: React.FC<ClientsPageProps> = ({ clients, onRefresh, on
                     </td>
                     <td style={{ fontSize: '12px' }}>{c.deliveryZone || 'Standard'}</td>
                     <td style={{ fontSize: '12px' }}>{c.paymentTerms.replace(/_/g, ' ')}</td>
-                    <td className="mono">₹{c.creditLimit.toLocaleString()}</td>
-                    <td className="mono" style={{ fontWeight: 600, color: hasDues ? 'var(--warning-text)' : 'var(--text-muted)' }}>
-                      ₹{c.currentBalance.toLocaleString()}
-                    </td>
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono">₹{c.creditLimit.toLocaleString()}</td>
+                    )}
+                    {userRole !== 'DISPATCHER' && (
+                      <td className="mono" style={{ fontWeight: 600, color: hasDues ? 'var(--warning-text)' : 'var(--text-muted)' }}>
+                        ₹{c.currentBalance.toLocaleString()}
+                      </td>
+                    )}
                     <td className="mono" style={{ fontWeight: 600 }}>
                       {c.emptyJarsHeld} cans
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        {hasDues && (
+                        {hasDues && (userRole === 'ADMIN' || userRole === 'ACCOUNTANT') && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenPay(c)}

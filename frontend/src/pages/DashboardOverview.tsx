@@ -8,10 +8,12 @@ import {
   Building2,
   AlertCircle,
   Plus,
+  Layers,
+  CheckCircle2,
 } from 'lucide-react';
 import { StatCard } from '../components/StatCard';
 import { Badge } from '../components/Badge';
-import type { AnalyticsSummary, Delivery, Order } from '../types';
+import type { AnalyticsSummary, Delivery, Order, UserRole } from '../types';
 
 interface DashboardOverviewProps {
   analytics: AnalyticsSummary | null;
@@ -20,6 +22,7 @@ interface DashboardOverviewProps {
   onNavigate: (tab: string) => void;
   onOpenNewOrder: () => void;
   onOpenNewBatch: () => void;
+  userRole?: UserRole;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -29,6 +32,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onNavigate,
   onOpenNewOrder,
   onOpenNewBatch,
+  userRole = 'ADMIN',
 }) => {
   if (!analytics) {
     return <div style={{ padding: '40px', color: 'var(--text-muted)' }}>Loading business metrics...</div>;
@@ -38,66 +42,158 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const recentOrders = orders.slice(0, 5);
   const pendingDeliveries = deliveries.filter((d) => d.status !== 'DELIVERED').slice(0, 5);
 
+  const isDispatcher = userRole === 'DISPATCHER';
+  const isSales = userRole === 'SALES';
+  const isAccountant = userRole === 'ACCOUNTANT';
+  const isAdmin = userRole === 'ADMIN';
+
   return (
     <div className="content-wrapper">
       {/* Action Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-main)' }}>
-            Classroom Aqua Bottlers & Distribution
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-main)' }}>
+              Classroom Aqua Bottlers & Distribution
+            </h2>
+            <span className="badge badge-neutral" style={{ fontSize: '10px' }}>
+              {userRole} WORKSPACE
+            </span>
+          </div>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Real-time operations, non-GPS dispatch & automated margin ledger
+            {isDispatcher && 'Operational fleet overview, vehicle dispatches & 20L empty jar balances'}
+            {isSales && 'Commercial client orders, outstanding accounts & delivery statuses'}
+            {isAccountant && 'Company financial ledgers, invoice settlements & operational overheads'}
+            {isAdmin && 'Executive real-time operations, factory COGS & automated profit analytics'}
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn btn-secondary btn-sm" onClick={onOpenNewBatch}>
-            <Package size={14} />
-            <span>Procure Batch</span>
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={onOpenNewOrder}>
-            <Plus size={14} />
-            <span>Create Sales Order</span>
-          </button>
+          {isAdmin && (
+            <button className="btn btn-secondary btn-sm" onClick={onOpenNewBatch}>
+              <Package size={14} />
+              <span>Procure Batch</span>
+            </button>
+          )}
+
+          {(isAdmin || isSales) && (
+            <button className="btn btn-primary btn-sm" onClick={onOpenNewOrder}>
+              <Plus size={14} />
+              <span>Create Sales Order</span>
+            </button>
+          )}
+
+          {isDispatcher && (
+            <button className="btn btn-primary btn-sm" onClick={() => onNavigate('deliveries')}>
+              <Truck size={14} />
+              <span>Open Dispatch Board</span>
+            </button>
+          )}
+
+          {isAccountant && (
+            <button className="btn btn-primary btn-sm" onClick={() => onNavigate('orders')}>
+              <DollarSign size={14} />
+              <span>Review Invoices & Payments</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* KPI Stats Grid */}
-      <div className="grid-4">
-        <StatCard
-          label="Total Gross Sales"
-          value={`₹${financials.totalRevenue.toLocaleString()}`}
-          meta={`Gross Margin: ${financials.grossMarginPct}%`}
-          icon={DollarSign}
-        />
-        <StatCard
-          label="Net Profit"
-          value={`₹${financials.netProfit.toLocaleString()}`}
-          meta={`After ₹${financials.totalOperatingExpenses.toLocaleString()} expenses`}
-          icon={TrendingUp}
-          variant={financials.netProfit >= 0 ? 'success' : 'danger'}
-        />
-        <StatCard
-          label="Hotel Receivables (Dues)"
-          value={`₹${financials.totalReceivables.toLocaleString()}`}
-          meta={`${operations.overdueOrdersCount} invoices pending payment`}
-          icon={AlertCircle}
-          variant={financials.totalReceivables > 0 ? 'warning' : 'default'}
-        />
-        <StatCard
-          label="20L Jars With Hotels"
-          value={`${operations.totalJarsWithClients} cans`}
-          meta={`${operations.jarsInDepotStock} full cans in depot stock`}
-          icon={RotateCcw}
-        />
-      </div>
+      {/* KPI Stats Grid - Role Adapted */}
+      {isDispatcher ? (
+        <div className="grid-4">
+          <StatCard
+            label="Vehicles On Road"
+            value={`${operations.deliveries.outForDelivery} Dispatched`}
+            meta="Active vehicle runs right now"
+            icon={Truck}
+            variant={operations.deliveries.outForDelivery > 0 ? 'warning' : 'default'}
+          />
+          <StatCard
+            label="Pending Deliveries"
+            value={`${operations.deliveries.scheduled} Drops`}
+            meta="Scheduled for today"
+            icon={AlertCircle}
+          />
+          <StatCard
+            label="20L Jars With Clients"
+            value={`${operations.totalJarsWithClients} Cans`}
+            meta="Held at commercial hotels"
+            icon={RotateCcw}
+          />
+          <StatCard
+            label="Depot Jar Stock"
+            value={`${operations.jarsInDepotStock} Cans`}
+            meta="Filled & ready in warehouse"
+            icon={Layers}
+            variant="success"
+          />
+        </div>
+      ) : isSales ? (
+        <div className="grid-4">
+          <StatCard
+            label="Total Sales Volume"
+            value={`₹${financials.totalRevenue.toLocaleString()}`}
+            meta={`${operations.totalOrders} total sales orders`}
+            icon={DollarSign}
+          />
+          <StatCard
+            label="Commercial Accounts"
+            value={`${operations.totalClients} Hotels`}
+            meta="Active B2B client accounts"
+            icon={Building2}
+          />
+          <StatCard
+            label="Hotel Receivables (Dues)"
+            value={`₹${financials.totalReceivables.toLocaleString()}`}
+            meta={`${operations.overdueOrdersCount} invoices pending payment`}
+            icon={AlertCircle}
+            variant={financials.totalReceivables > 0 ? 'warning' : 'default'}
+          />
+          <StatCard
+            label="20L Jars With Hotels"
+            value={`${operations.totalJarsWithClients} cans`}
+            meta={`${operations.jarsInDepotStock} full cans in depot stock`}
+            icon={RotateCcw}
+          />
+        </div>
+      ) : (
+        /* ADMIN & ACCOUNTANT Full Financial Overview */
+        <div className="grid-4">
+          <StatCard
+            label="Total Gross Sales"
+            value={`₹${financials.totalRevenue.toLocaleString()}`}
+            meta={`Gross Margin: ${financials.grossMarginPct}%`}
+            icon={DollarSign}
+          />
+          <StatCard
+            label="Net Profit"
+            value={`₹${financials.netProfit.toLocaleString()}`}
+            meta={`After ₹${financials.totalOperatingExpenses.toLocaleString()} expenses`}
+            icon={TrendingUp}
+            variant={financials.netProfit >= 0 ? 'success' : 'danger'}
+          />
+          <StatCard
+            label="Hotel Receivables (Dues)"
+            value={`₹${financials.totalReceivables.toLocaleString()}`}
+            meta={`${operations.overdueOrdersCount} invoices pending payment`}
+            icon={AlertCircle}
+            variant={financials.totalReceivables > 0 ? 'warning' : 'default'}
+          />
+          <StatCard
+            label="20L Jars With Hotels"
+            value={`${operations.totalJarsWithClients} cans`}
+            meta={`${operations.jarsInDepotStock} full cans in depot stock`}
+            icon={RotateCcw}
+          />
+        </div>
+      )}
 
       {/* Quick Metrics Secondary Bar */}
       <div className="grid-3">
         <div className="card" style={{ padding: '14px 18px', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Active Deliveries</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Deliveries Status</div>
             <div style={{ fontSize: '18px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
               {operations.deliveries.outForDelivery} On Road / {operations.deliveries.scheduled} Scheduled
             </div>
@@ -110,15 +206,33 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
         <div className="card" style={{ padding: '14px 18px', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Inventory Landed Value</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {isDispatcher ? 'Completed Deliveries' : 'Inventory Landed Value'}
+            </div>
             <div style={{ fontSize: '18px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-              ₹{financials.totalInventoryValue.toLocaleString()}
+              {isDispatcher
+                ? `${operations.deliveries.delivered} Drops Completed`
+                : `₹${financials.totalInventoryValue.toLocaleString()}`}
             </div>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('batches')}>
-            <Package size={13} />
-            <span>Batches</span>
-          </button>
+          {isAdmin && (
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('batches')}>
+              <Package size={13} />
+              <span>Batches</span>
+            </button>
+          )}
+          {isDispatcher && (
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('jars')}>
+              <RotateCcw size={13} />
+              <span>Jar Ledger</span>
+            </button>
+          )}
+          {(isSales || isAccountant) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('orders')}>
+              <DollarSign size={13} />
+              <span>Orders</span>
+            </button>
+          )}
         </div>
 
         <div className="card" style={{ padding: '14px 18px', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -211,9 +325,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <tr>
                   <th>Hotel / Client</th>
                   <th>Orders</th>
-                  <th>Revenue</th>
+                  {!isDispatcher && <th>Revenue</th>}
                   <th>Empty Jars Held</th>
-                  <th>Balance Due</th>
+                  {!isDispatcher && <th>Balance Due</th>}
                 </tr>
               </thead>
               <tbody>
@@ -221,11 +335,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   <tr key={client.id}>
                     <td style={{ fontWeight: 500 }}>{client.name}</td>
                     <td className="mono">{client.ordersCount}</td>
-                    <td className="mono" style={{ fontWeight: 600 }}>₹{client.revenue.toLocaleString()}</td>
+                    {!isDispatcher && (
+                      <td className="mono" style={{ fontWeight: 600 }}>₹{client.revenue.toLocaleString()}</td>
+                    )}
                     <td className="mono">{client.emptyJars} cans</td>
-                    <td className="mono" style={{ color: client.balance > 0 ? 'var(--warning-text)' : 'var(--text-muted)' }}>
-                      ₹{client.balance.toLocaleString()}
-                    </td>
+                    {!isDispatcher && (
+                      <td className="mono" style={{ color: client.balance > 0 ? 'var(--warning-text)' : 'var(--text-muted)' }}>
+                        ₹{client.balance.toLocaleString()}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -234,53 +352,65 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </div>
       </div>
 
-      {/* Recent Orders with Margin calculation */}
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <div className="card-title">Recent Sales Invoices & Profit Breakdown</div>
-            <div className="card-subtitle">COGS computed accurately from procurement batch landed cost</div>
+      {/* Recent Orders with Margin calculation (Hidden for DISPATCHER) */}
+      {!isDispatcher && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                {isSales ? 'Recent Sales Invoices' : 'Recent Sales Invoices & Profit Breakdown'}
+              </div>
+              <div className="card-subtitle">
+                {isSales
+                  ? 'Client billing totals & collection statuses'
+                  : 'COGS computed accurately from procurement batch landed cost'}
+              </div>
+            </div>
+            <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('orders')}>
+              View All Invoices
+            </button>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('orders')}>
-            View All Invoices
-          </button>
-        </div>
 
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Invoice</th>
-                <th>Date</th>
-                <th>Hotel</th>
-                <th>Total Sales</th>
-                <th>COGS (Cost)</th>
-                <th>Gross Profit</th>
-                <th>Margin %</th>
-                <th>Payment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentOrders.map((ord) => (
-                <tr key={ord.id}>
-                  <td className="mono" style={{ fontWeight: 600 }}>{ord.invoiceNumber}</td>
-                  <td style={{ fontSize: '12px' }}>{new Date(ord.orderDate).toLocaleDateString()}</td>
-                  <td style={{ fontWeight: 500 }}>{ord.client?.name}</td>
-                  <td className="mono" style={{ fontWeight: 600 }}>₹{ord.totalAmount.toLocaleString()}</td>
-                  <td className="mono" style={{ color: 'var(--text-muted)' }}>₹{ord.totalCost.toLocaleString()}</td>
-                  <td className="mono" style={{ color: 'var(--success-text)', fontWeight: 600 }}>
-                    +₹{ord.grossProfit.toLocaleString()}
-                  </td>
-                  <td className="mono">{ord.grossMarginPct}%</td>
-                  <td>
-                    <Badge status={ord.paymentStatus} />
-                  </td>
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Date</th>
+                  <th>Hotel</th>
+                  <th>Total Sales</th>
+                  {!isSales && <th>COGS (Cost)</th>}
+                  {!isSales && <th>Gross Profit</th>}
+                  {!isSales && <th>Margin %</th>}
+                  <th>Payment</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recentOrders.map((ord) => (
+                  <tr key={ord.id}>
+                    <td className="mono" style={{ fontWeight: 600 }}>{ord.invoiceNumber}</td>
+                    <td style={{ fontSize: '12px' }}>{new Date(ord.orderDate).toLocaleDateString()}</td>
+                    <td style={{ fontWeight: 500 }}>{ord.client?.name}</td>
+                    <td className="mono" style={{ fontWeight: 600 }}>₹{ord.totalAmount.toLocaleString()}</td>
+                    {!isSales && (
+                      <td className="mono" style={{ color: 'var(--text-muted)' }}>₹{ord.totalCost.toLocaleString()}</td>
+                    )}
+                    {!isSales && (
+                      <td className="mono" style={{ color: 'var(--success-text)', fontWeight: 600 }}>
+                        +₹{ord.grossProfit.toLocaleString()}
+                      </td>
+                    )}
+                    {!isSales && <td className="mono">{ord.grossMarginPct}%</td>}
+                    <td>
+                      <Badge status={ord.paymentStatus} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

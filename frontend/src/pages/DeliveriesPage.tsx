@@ -2,15 +2,21 @@ import React, { useState } from 'react';
 import { Truck, CheckCircle2, Clock, Printer, X, User, Phone, MapPin } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { api } from '../services/api';
-import type { Delivery } from '../types';
+import type { Delivery, UserRole } from '../types';
 
 interface DeliveriesPageProps {
   deliveries: Delivery[];
   onRefresh: () => void;
   onDeliveryUpdated?: (updatedDelivery: Delivery) => void;
+  userRole?: UserRole;
 }
 
-export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRefresh, onDeliveryUpdated }) => {
+export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({
+  deliveries,
+  onRefresh,
+  onDeliveryUpdated,
+  userRole = 'ADMIN',
+}) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [activeDelivery, setActiveDelivery] = useState<Delivery | null>(null);
   const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
@@ -213,7 +219,7 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        {del.status === 'SCHEDULED' && (
+                        {userRole !== 'SALES' && del.status === 'SCHEDULED' && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleStartDispatch(del.id)}
@@ -224,7 +230,7 @@ export const DeliveriesPage: React.FC<DeliveriesPageProps> = ({ deliveries, onRe
                           </button>
                         )}
 
-                        {del.status === 'OUT_FOR_DELIVERY' && (
+                        {userRole !== 'SALES' && del.status === 'OUT_FOR_DELIVERY' && (
                           <button
                             className="btn btn-primary btn-sm"
                             onClick={() => handleOpenDeliverModal(del)}

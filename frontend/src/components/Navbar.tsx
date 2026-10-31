@@ -55,8 +55,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, user, onLogout }) =>
 
       <div className="topbar-right">
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--success-text)' }}>
-          <Database size={13} />
-          <span>Neon Cloud Active</span>
+          <span style={{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', backgroundColor: 'var(--success-text)' }}></span>
+          <span>System Live</span>
         </div>
 
         <div className="time-pill">{currentTime}</div>
@@ -76,7 +76,24 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, user, onLogout }) =>
           >
             <UserIcon size={13} color="var(--text-muted)" />
             <span style={{ fontWeight: 500 }}>{user.name}</span>
-            <span className="badge badge-neutral" style={{ fontSize: '10px' }}>{user.role}</span>
+            <span
+              className={`badge ${
+                user.role === 'ADMIN'
+                  ? 'badge-danger'
+                  : user.role === 'DISPATCHER'
+                  ? 'badge-info'
+                  : user.role === 'SALES'
+                  ? 'badge-success'
+                  : 'badge-warning'
+              }`}
+              style={{ fontSize: '10px', fontWeight: 600 }}
+            >
+              {user.role === 'ADMIN' && '👑 '}
+              {user.role === 'DISPATCHER' && '🚚 '}
+              {user.role === 'SALES' && '💼 '}
+              {user.role === 'ACCOUNTANT' && '📊 '}
+              {user.role}
+            </span>
           </div>
         )}
 

@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const analyticsRouter = Router();
+
+// Financial Analytics is restricted strictly to ADMIN & ACCOUNTANT
+analyticsRouter.use(authenticateToken, requireRoles('ADMIN', 'ACCOUNTANT'));
 
 analyticsRouter.get('/summary', async (req, res) => {
   try {

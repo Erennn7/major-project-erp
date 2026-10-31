@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Receipt, Fuel, UserCheck, Wrench, Home, Zap, ShieldCheck, X, Trash2 } from 'lucide-react';
 import { StatCard } from '../components/StatCard';
 import { api } from '../services/api';
-import type { Expense } from '../types';
+import type { Expense, UserRole } from '../types';
 
 interface ExpensesPageProps {
   onRefresh: () => void;
+  userRole?: UserRole;
 }
 
-export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onRefresh }) => {
+export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onRefresh, userRole = 'ADMIN' }) => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalAmount, setTotalAmount] = useState<number>(0);
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
@@ -204,14 +205,18 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({ onRefresh }) => {
                       ₹{(Number(e?.amount) || 0).toLocaleString()}
                     </td>
                     <td>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '4px 8px', color: 'var(--danger-text)' }}
-                        onClick={() => e?.id && handleDeleteExpense(e.id)}
-                        title="Delete expense"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      {userRole === 'ADMIN' ? (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '4px 8px', color: 'var(--danger-text)' }}
+                          onClick={() => e?.id && handleDeleteExpense(e.id)}
+                          title="Delete expense"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Locked</span>
+                      )}
                     </td>
                   </tr>
                 ))

@@ -1,21 +1,25 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { authenticateToken } from '../middleware/auth';
 
 export const bootstrapRouter = Router();
 
-// In-memory micro-cache (5 second TTL) to eliminate redundant roundtrips on rapid tab navigation
-let bootstrapCache: { data: any; timestamp: number } | null = null;
+// In-memory micro-cache (5 second TTL) keyed by user role
+const roleCache: Record<string, { data: any; timestamp: number }> = {};
 const CACHE_TTL_MS = 5000;
 
 export function invalidateBootstrapCache() {
-  bootstrapCache = null;
+  for (const key of Object.keys(roleCache)) {
+    delete roleCache[key];
+  }
 }
 
-bootstrapRouter.get('/', async (req, res) => {
+bootstrapRouter.get('/', authenticateToken, async (req, res) => {
   try {
+    const role = req.user?.role || 'ADMIN';
     const now = Date.now();
-    if (bootstrapCache && now - bootstrapCache.timestamp < CACHE_TTL_MS) {
-      return res.json({ success: true, data: bootstrapCache.data, cached: true });
+    if (roleCache[role] && now - roleCache[role].timestamp < CACHE_TTL_MS) {
+      return res.json({ success: true, data: roleCache[role].data, cached: true });
     }
 
     // Execute queries in parallel using warm backend connections
@@ -158,47 +162,188 @@ bootstrapRouter.get('/', async (req, res) => {
 
     const trend = Object.values(trendMap).sort((a, b) => a.date.localeCompare(b.date));
 
-    const analytics = {
-      financials: {
-        totalRevenue,
-        totalCOGS,
-        grossProfit,
-        grossMarginPct: Number(grossMarginPct.toFixed(2)),
-        totalOperatingExpenses,
-        netProfit,
-        netMarginPct: Number(netMarginPct.toFixed(2)),
-        totalReceivables,
-        totalInventoryValue,
-      },
-      operations: {
-        totalClients: clients.length,
-        totalOrders: orders.length,
-        overdueOrdersCount,
-        totalJarsWithClients,
-        jarsInDepotStock,
-        deliveries: {
-          delivered: deliveredCount,
-          outForDelivery: outForDeliveryCount,
-          scheduled: scheduledCount,
-          total: deliveries.length,
+    // Role-tailored filtering
+    let tailoredAnalytics: any = null;
+    let tailoredBatches = batches;
+    let tailoredClients = clients;
+    let tailoredOrders = orders;
+
+    if (role === 'DISPATCHER') {
+      // Dispatcher: Only operational statistics (jars, deliveries, depot stock). No margins, P&L, or financial ledger.
+      tailoredAnalytics = {
+        financials: {
+          totalRevenue: 0,
+          totalCOGS: 0,
+          grossProfit: 0,
+          grossMarginPct: 0,
+          totalOperatingExpenses: 0,
+          netProfit: 0,
+          netMarginPct: 0,
+          totalReceivables: 0,
+          totalInventoryValue: 0,
         },
-      },
-      topClients,
-      categoryBreakdown: Object.values(categoryRevenueMap),
-      expenseCategoryBreakdown: expenseCategoryMap,
-      trend,
-    };
+        operations: {
+          totalClients: clients.length,
+          totalOrders: orders.length,
+          overdueOrdersCount: 0,
+          totalJarsWithClients,
+          jarsInDepotStock,
+          deliveries: {
+            delivered: deliveredCount,
+            outForDelivery: outForDeliveryCount,
+            scheduled: scheduledCount,
+            total: deliveries.length,
+          },
+        },
+        topClients: topClients.map((c) => ({
+          id: c.id,
+          name: c.name,
+          revenue: 0,
+          ordersCount: c.ordersCount,
+          emptyJars: c.emptyJars,
+          balance: 0,
+        })),
+        categoryBreakdown: Object.values(categoryRevenueMap).map((cat) => ({
+          category: cat.category,
+          revenue: 0,
+          volume: cat.volume,
+          profit: 0,
+        })),
+        expenseCategoryBreakdown: {},
+        trend: [],
+      };
+
+      // Disallow unit landed costs from batches
+      tailoredBatches = batches.map((b) => ({
+        ...b,
+        purchaseCostPerUnit: 0,
+        transportCostTotal: 0,
+        totalCost: 0,
+        landedCostPerUnit: 0,
+      }));
+
+      // Hide client financial dues
+      tailoredClients = clients.map((c) => ({
+        ...c,
+        currentBalance: 0,
+        creditLimit: 0,
+      }));
+
+      // Hide order costs and profit margins
+      tailoredOrders = orders.map((o) => ({
+        ...o,
+        totalCost: 0,
+        grossProfit: 0,
+        grossMarginPct: 0,
+        items: o.items.map((it) => ({
+          ...it,
+          costPricePerUnit: 0,
+          profit: 0,
+        })),
+      }));
+    } else if (role === 'SALES') {
+      // Sales: Revenue & receivables visible, but company overheads and net margin confidential
+      tailoredAnalytics = {
+        financials: {
+          totalRevenue,
+          totalCOGS: 0,
+          grossProfit: 0,
+          grossMarginPct: 0,
+          totalOperatingExpenses: 0,
+          netProfit: 0,
+          netMarginPct: 0,
+          totalReceivables,
+          totalInventoryValue,
+        },
+        operations: {
+          totalClients: clients.length,
+          totalOrders: orders.length,
+          overdueOrdersCount,
+          totalJarsWithClients,
+          jarsInDepotStock,
+          deliveries: {
+            delivered: deliveredCount,
+            outForDelivery: outForDeliveryCount,
+            scheduled: scheduledCount,
+            total: deliveries.length,
+          },
+        },
+        topClients,
+        categoryBreakdown: Object.values(categoryRevenueMap).map((cat) => ({
+          category: cat.category,
+          revenue: cat.revenue,
+          volume: cat.volume,
+          profit: 0,
+        })),
+        expenseCategoryBreakdown: {},
+        trend: trend.map((t) => ({
+          date: t.date,
+          revenue: t.revenue,
+          cogs: 0,
+          profit: 0,
+          expenses: 0,
+        })),
+      };
+
+      // Sales does not manage batches
+      tailoredBatches = [];
+
+      // Sales sees invoice totals, but not factory cost margins
+      tailoredOrders = orders.map((o) => ({
+        ...o,
+        totalCost: 0,
+        grossProfit: 0,
+        grossMarginPct: 0,
+        items: o.items.map((it) => ({
+          ...it,
+          costPricePerUnit: 0,
+          profit: 0,
+        })),
+      }));
+    } else {
+      // ADMIN & ACCOUNTANT: Full access
+      tailoredAnalytics = {
+        financials: {
+          totalRevenue,
+          totalCOGS,
+          grossProfit,
+          grossMarginPct: Number(grossMarginPct.toFixed(2)),
+          totalOperatingExpenses,
+          netProfit,
+          netMarginPct: Number(netMarginPct.toFixed(2)),
+          totalReceivables,
+          totalInventoryValue,
+        },
+        operations: {
+          totalClients: clients.length,
+          totalOrders: orders.length,
+          overdueOrdersCount,
+          totalJarsWithClients,
+          jarsInDepotStock,
+          deliveries: {
+            delivered: deliveredCount,
+            outForDelivery: outForDeliveryCount,
+            scheduled: scheduledCount,
+            total: deliveries.length,
+          },
+        },
+        topClients,
+        categoryBreakdown: Object.values(categoryRevenueMap),
+        expenseCategoryBreakdown: expenseCategoryMap,
+        trend,
+      };
+    }
 
     const payload = {
-      analytics,
+      analytics: tailoredAnalytics,
       deliveries,
-      orders,
-      clients,
+      orders: tailoredOrders,
+      clients: tailoredClients,
       products,
-      batches,
+      batches: tailoredBatches,
     };
 
-    bootstrapCache = { data: payload, timestamp: Date.now() };
+    roleCache[role] = { data: payload, timestamp: Date.now() };
 
     res.json({ success: true, data: payload, cached: false });
   } catch (error: any) {

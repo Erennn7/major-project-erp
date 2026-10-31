@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Printer, DollarSign, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { api } from '../services/api';
-import type { Order, Client, Product, Batch, Delivery } from '../types';
+import type { Order, Client, Product, Batch, Delivery, UserRole } from '../types';
 
 interface OrdersPageProps {
   orders: Order[];
@@ -14,6 +14,7 @@ interface OrdersPageProps {
   isOpenCreateModal: boolean;
   onCloseCreateModal: () => void;
   onOpenCreateModal: () => void;
+  userRole?: UserRole;
 }
 
 export const OrdersPage: React.FC<OrdersPageProps> = ({
@@ -26,6 +27,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
   isOpenCreateModal,
   onCloseCreateModal,
   onOpenCreateModal,
+  userRole = 'ADMIN',
 }) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -330,10 +332,12 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
             ))}
           </div>
 
-          <button className="btn btn-primary btn-sm" onClick={onOpenCreateModal}>
-            <Plus size={14} />
-            <span>New Sales Order</span>
-          </button>
+          {userRole !== 'ACCOUNTANT' && (
+            <button className="btn btn-primary btn-sm" onClick={onOpenCreateModal}>
+              <Plus size={14} />
+              <span>New Sales Order</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -347,9 +351,9 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                 <th>Order Date</th>
                 <th>Client Hotel</th>
                 <th>Sales Total</th>
-                <th>COGS (Cost)</th>
-                <th>Gross Profit</th>
-                <th>Margin %</th>
+                {userRole !== 'SALES' && <th>COGS (Cost)</th>}
+                {userRole !== 'SALES' && <th>Gross Profit</th>}
+                {userRole !== 'SALES' && <th>Margin %</th>}
                 <th>Paid / Due</th>
                 <th>Payment Status</th>
                 <th>Actions</th>
@@ -369,11 +373,15 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                       </div>
                     </td>
                     <td className="mono" style={{ fontWeight: 600 }}>₹{ord.totalAmount.toLocaleString()}</td>
-                    <td className="mono" style={{ color: 'var(--text-muted)' }}>₹{ord.totalCost.toLocaleString()}</td>
-                    <td className="mono" style={{ color: 'var(--success-text)', fontWeight: 600 }}>
-                      +₹{ord.grossProfit.toLocaleString()}
-                    </td>
-                    <td className="mono">{ord.grossMarginPct}%</td>
+                    {userRole !== 'SALES' && (
+                      <td className="mono" style={{ color: 'var(--text-muted)' }}>₹{ord.totalCost.toLocaleString()}</td>
+                    )}
+                    {userRole !== 'SALES' && (
+                      <td className="mono" style={{ color: 'var(--success-text)', fontWeight: 600 }}>
+                        +₹{ord.grossProfit.toLocaleString()}
+                      </td>
+                    )}
+                    {userRole !== 'SALES' && <td className="mono">{ord.grossMarginPct}%</td>}
                     <td className="mono" style={{ fontSize: '12px' }}>
                       <span style={{ color: 'var(--success-text)' }}>₹{ord.paidAmount.toLocaleString()}</span>
                       {due > 0 && <span style={{ color: 'var(--warning-text)' }}> / ₹{due.toLocaleString()}</span>}
@@ -383,7 +391,7 @@ export const OrdersPage: React.FC<OrdersPageProps> = ({
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        {ord.paymentStatus !== 'PAID' && (
+                        {ord.paymentStatus !== 'PAID' && userRole !== 'SALES' && (
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleOpenPayModal(ord)}

@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const batchesRouter = Router();
 
-// GET all batches
-batchesRouter.get('/', async (req, res) => {
+// Base auth
+batchesRouter.use(authenticateToken);
+
+// GET all batches (ADMIN, DISPATCHER, ACCOUNTANT)
+batchesRouter.get('/', requireRoles('ADMIN', 'DISPATCHER', 'ACCOUNTANT'), async (req, res) => {
   try {
     const batches = await prisma.batch.findMany({
       include: {
@@ -14,14 +18,27 @@ batchesRouter.get('/', async (req, res) => {
       orderBy: { purchaseDate: 'desc' },
       take: 100,
     });
+
+    // If DISPATCHER, sanitize landed costs
+    if (req.user?.role === 'DISPATCHER') {
+      const sanitized = batches.map((b) => ({
+        ...b,
+        purchaseCostPerUnit: 0,
+        transportCostTotal: 0,
+        totalCost: 0,
+        landedCostPerUnit: 0,
+      }));
+      return res.json({ success: true, data: sanitized });
+    }
+
     res.json({ success: true, data: batches });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST new procurement batch
-batchesRouter.post('/', async (req, res) => {
+// POST new procurement batch (strictly ADMIN)
+batchesRouter.post('/', requireRoles('ADMIN'), async (req, res) => {
   try {
     const {
       batchNumber,
@@ -130,10 +147,10 @@ batchesRouter.post('/', async (req, res) => {
   }
 });
 
-// PUT update batch
-batchesRouter.put('/:id', async (req, res) => {
+// PUT update batch (strictly ADMIN)
+batchesRouter.put('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { supplierName, notes, expiryDate } = req.body;
 
     const batch = await prisma.batch.update({
@@ -153,10 +170,10 @@ batchesRouter.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE batch (only if no orders tied)
-batchesRouter.delete('/:id', async (req, res) => {
+// DELETE batch (strictly ADMIN, only if no orders tied)
+batchesRouter.delete('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const batch = await prisma.batch.findUnique({
       where: { id },
       include: { orderItems: true },

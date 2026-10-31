@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, ROLE_ALLOWED_TABS } from './components/Sidebar';
 import { Navbar } from './components/Navbar';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardOverview } from './pages/DashboardOverview';
@@ -21,6 +21,16 @@ export const App: React.FC = () => {
   });
 
   const [currentTab, setCurrentTab] = useState<string>('overview');
+
+  // Enforce role-permitted tab routing
+  useEffect(() => {
+    if (user) {
+      const allowed = ROLE_ALLOWED_TABS[user.role] || ROLE_ALLOWED_TABS.ADMIN;
+      if (!allowed.includes(currentTab)) {
+        setCurrentTab(allowed[0] || 'overview');
+      }
+    }
+  }, [user, currentTab]);
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -165,6 +175,7 @@ export const App: React.FC = () => {
         onSelectTab={setCurrentTab}
         pendingDeliveriesCount={pendingDeliveriesCount}
         unpaidOrdersCount={unpaidOrdersCount}
+        userRole={user.role}
       />
 
       {/* Main Content Area */}
@@ -173,7 +184,7 @@ export const App: React.FC = () => {
 
         {initialLoading && !analytics ? (
           <div style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            Connecting to Neon PostgreSQL & loading live data...
+            Connecting to cloud workspace & loading live records...
           </div>
         ) : (
           <ErrorBoundary key={currentTab}>
@@ -185,16 +196,32 @@ export const App: React.FC = () => {
                 onNavigate={setCurrentTab}
                 onOpenNewOrder={() => setIsOpenOrderModal(true)}
                 onOpenNewBatch={() => setIsOpenBatchModal(true)}
+                userRole={user.role}
               />
             )}
 
-            {currentTab === 'analytics' && <FinancialAnalytics analytics={analytics} />}
+            {currentTab === 'analytics' && (
+              user.role === 'ADMIN' || user.role === 'ACCOUNTANT' ? (
+                <FinancialAnalytics analytics={analytics} />
+              ) : (
+                <div className="card" style={{ padding: '40px', textAlign: 'center', margin: '20px' }}>
+                  <h3 style={{ marginBottom: '8px' }}>Access Restricted</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                    Financial Analytics and Profit Calculations are restricted to Administrators and Accountants.
+                  </p>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: '16px' }} onClick={() => setCurrentTab('overview')}>
+                    Return to Overview
+                  </button>
+                </div>
+              )
+            )}
 
             {currentTab === 'deliveries' && (
               <DeliveriesPage
                 deliveries={deliveries}
                 onRefresh={() => refreshData(true)}
                 onDeliveryUpdated={handleDeliveryUpdated}
+                userRole={user.role}
               />
             )}
 
@@ -209,19 +236,33 @@ export const App: React.FC = () => {
                 isOpenCreateModal={isOpenOrderModal}
                 onOpenCreateModal={() => setIsOpenOrderModal(true)}
                 onCloseCreateModal={() => setIsOpenOrderModal(false)}
+                userRole={user.role}
               />
             )}
 
             {currentTab === 'batches' && (
-              <BatchesPage
-                batches={batches}
-                products={products}
-                onRefresh={() => refreshData(true)}
-                onBatchCreated={handleBatchCreated}
-                isOpenModal={isOpenBatchModal}
-                onOpenModal={() => setIsOpenBatchModal(true)}
-                onCloseModal={() => setIsOpenBatchModal(false)}
-              />
+              user.role !== 'SALES' ? (
+                <BatchesPage
+                  batches={batches}
+                  products={products}
+                  onRefresh={() => refreshData(true)}
+                  onBatchCreated={handleBatchCreated}
+                  isOpenModal={isOpenBatchModal}
+                  onOpenModal={() => setIsOpenBatchModal(true)}
+                  onCloseModal={() => setIsOpenBatchModal(false)}
+                  userRole={user.role}
+                />
+              ) : (
+                <div className="card" style={{ padding: '40px', textAlign: 'center', margin: '20px' }}>
+                  <h3 style={{ marginBottom: '8px' }}>Access Restricted</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                    Procurement batch management and bottler plant costs are restricted to Operations and Administration.
+                  </p>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: '16px' }} onClick={() => setCurrentTab('overview')}>
+                    Return to Overview
+                  </button>
+                </div>
+              )
             )}
 
             {currentTab === 'clients' && (
@@ -229,6 +270,7 @@ export const App: React.FC = () => {
                 clients={clients}
                 onRefresh={() => refreshData(true)}
                 onClientCreated={handleClientCreated}
+                userRole={user.role}
               />
             )}
 
@@ -237,7 +279,19 @@ export const App: React.FC = () => {
             )}
 
             {currentTab === 'expenses' && (
-              <ExpensesPage onRefresh={() => refreshData(true)} />
+              user.role === 'ADMIN' || user.role === 'ACCOUNTANT' ? (
+                <ExpensesPage onRefresh={() => refreshData(true)} userRole={user.role} />
+              ) : (
+                <div className="card" style={{ padding: '40px', textAlign: 'center', margin: '20px' }}>
+                  <h3 style={{ marginBottom: '8px' }}>Access Restricted</h3>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                    Operating expenses and overhead logging are restricted to Administrators and Accountants.
+                  </p>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: '16px' }} onClick={() => setCurrentTab('overview')}>
+                    Return to Overview
+                  </button>
+                </div>
+              )
             )}
           </ErrorBoundary>
         )}

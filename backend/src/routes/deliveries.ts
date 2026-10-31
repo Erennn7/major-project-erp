@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const deliveriesRouter = Router();
 
-// GET all deliveries with filters
-deliveriesRouter.get('/', async (req, res) => {
+// Base auth
+deliveriesRouter.use(authenticateToken);
+
+// GET all deliveries with filters (ADMIN, DISPATCHER, SALES)
+deliveriesRouter.get('/', requireRoles('ADMIN', 'DISPATCHER', 'SALES'), async (req, res) => {
   try {
     const { status, clientId, date } = req.query;
 
@@ -39,10 +43,10 @@ deliveriesRouter.get('/', async (req, res) => {
   }
 });
 
-// GET single delivery
-deliveriesRouter.get('/:id', async (req, res) => {
+// GET single delivery (ADMIN, DISPATCHER, SALES)
+deliveriesRouter.get('/:id', requireRoles('ADMIN', 'DISPATCHER', 'SALES'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const delivery = await prisma.delivery.findUnique({
       where: { id },
       include: {
@@ -68,10 +72,10 @@ deliveriesRouter.get('/:id', async (req, res) => {
   }
 });
 
-// PUT update delivery status (SCHEDULED -> OUT_FOR_DELIVERY -> DELIVERED)
-deliveriesRouter.put('/:id/status', async (req, res) => {
+// PUT update delivery status (ADMIN & DISPATCHER only)
+deliveriesRouter.put('/:id/status', requireRoles('ADMIN', 'DISPATCHER'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const {
       status,
       deliveredDate,

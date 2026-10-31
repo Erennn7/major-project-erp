@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const productsRouter = Router();
 
-// GET all products with active batch count
+// Base auth
+productsRouter.use(authenticateToken);
+
+// GET all products with active batch count (All authenticated roles)
 productsRouter.get('/', async (req, res) => {
   try {
     const products = await prisma.product.findMany({
@@ -22,8 +26,8 @@ productsRouter.get('/', async (req, res) => {
   }
 });
 
-// POST new product
-productsRouter.post('/', async (req, res) => {
+// POST new product (strictly ADMIN)
+productsRouter.post('/', requireRoles('ADMIN'), async (req, res) => {
   try {
     const { name, sku, category, unit, defaultPrice, defaultCost, isReturnable, depositAmount, minStockAlert } = req.body;
 
@@ -63,10 +67,10 @@ productsRouter.post('/', async (req, res) => {
   }
 });
 
-// PUT update product
-productsRouter.put('/:id', async (req, res) => {
+// PUT update product (strictly ADMIN)
+productsRouter.put('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { name, sku, category, unit, defaultPrice, defaultCost, isReturnable, depositAmount, minStockAlert } = req.body;
 
     const product = await prisma.product.update({
@@ -91,10 +95,10 @@ productsRouter.put('/:id', async (req, res) => {
   }
 });
 
-// POST reconcile stock (audit adjustment)
-productsRouter.post('/:id/reconcile-stock', async (req, res) => {
+// POST reconcile stock (strictly ADMIN audit adjustment)
+productsRouter.post('/:id/reconcile-stock', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { targetStock, reason } = req.body;
     const newStock = Number(targetStock);
 
@@ -145,10 +149,10 @@ productsRouter.post('/:id/reconcile-stock', async (req, res) => {
   }
 });
 
-// DELETE product
-productsRouter.delete('/:id', async (req, res) => {
+// DELETE product (strictly ADMIN)
+productsRouter.delete('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     await prisma.product.delete({ where: { id } });
     invalidateBootstrapCache();
     res.json({ success: true, message: 'Product deleted' });
@@ -156,3 +160,4 @@ productsRouter.delete('/:id', async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   }
 });
+

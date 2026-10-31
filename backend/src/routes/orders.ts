@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const ordersRouter = Router();
 
-// GET all orders
-ordersRouter.get('/', async (req, res) => {
+// Base auth
+ordersRouter.use(authenticateToken);
+
+// GET all orders (ADMIN, ACCOUNTANT, SALES)
+ordersRouter.get('/', requireRoles('ADMIN', 'ACCOUNTANT', 'SALES'), async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
       include: {
@@ -23,16 +27,32 @@ ordersRouter.get('/', async (req, res) => {
       orderBy: { orderDate: 'desc' },
       take: 100,
     });
+
+    if (req.user?.role === 'SALES') {
+      const sanitized = orders.map((o) => ({
+        ...o,
+        totalCost: 0,
+        grossProfit: 0,
+        grossMarginPct: 0,
+        items: o.items.map((it: any) => ({
+          ...it,
+          costPricePerUnit: 0,
+          profit: 0,
+        })),
+      }));
+      return res.json({ success: true, data: sanitized });
+    }
+
     res.json({ success: true, data: orders });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// GET single order with full details
-ordersRouter.get('/:id', async (req, res) => {
+// GET single order with full details (ADMIN, ACCOUNTANT, SALES)
+ordersRouter.get('/:id', requireRoles('ADMIN', 'ACCOUNTANT', 'SALES'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
@@ -52,14 +72,30 @@ ordersRouter.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Order not found' });
     }
 
+    if (req.user?.role === 'SALES') {
+      const sanitized = {
+        ...order,
+        totalCost: 0,
+        grossProfit: 0,
+        grossMarginPct: 0,
+        items: order.items.map((it) => ({
+          ...it,
+          costPricePerUnit: 0,
+          profit: 0,
+          batch: null,
+        })),
+      };
+      return res.json({ success: true, data: sanitized });
+    }
+
     res.json({ success: true, data: order });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST create sales order with full profit calculation & delivery challan creation
-ordersRouter.post('/', async (req, res) => {
+// POST create sales order (ADMIN & SALES)
+ordersRouter.post('/', requireRoles('ADMIN', 'SALES'), async (req, res) => {
   try {
     const {
       clientId,
@@ -401,10 +437,10 @@ ordersRouter.post('/', async (req, res) => {
   }
 });
 
-// PUT update order status / payment
-ordersRouter.put('/:id/payment', async (req, res) => {
+// PUT update order status / payment (ADMIN & ACCOUNTANT)
+ordersRouter.put('/:id/payment', requireRoles('ADMIN', 'ACCOUNTANT'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { amount, paymentMethod, referenceNumber, notes } = req.body;
     const payAmount = Number(amount);
 

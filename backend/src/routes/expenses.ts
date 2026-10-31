@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const expensesRouter = Router();
 
-// GET all expenses
-expensesRouter.get('/', async (req, res) => {
+// Base auth for all expense endpoints
+expensesRouter.use(authenticateToken);
+
+// GET all expenses (ADMIN & ACCOUNTANT)
+expensesRouter.get('/', requireRoles('ADMIN', 'ACCOUNTANT'), async (req, res) => {
   try {
     const { category } = req.query;
     const where: any = {};
@@ -26,8 +30,8 @@ expensesRouter.get('/', async (req, res) => {
   }
 });
 
-// POST new expense
-expensesRouter.post('/', async (req, res) => {
+// POST new expense (ADMIN & ACCOUNTANT)
+expensesRouter.post('/', requireRoles('ADMIN', 'ACCOUNTANT'), async (req, res) => {
   try {
     const {
       date,
@@ -68,10 +72,10 @@ expensesRouter.post('/', async (req, res) => {
   }
 });
 
-// DELETE expense
-expensesRouter.delete('/:id', async (req, res) => {
+// DELETE expense (strictly ADMIN)
+expensesRouter.delete('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     await prisma.expense.delete({ where: { id } });
     invalidateBootstrapCache();
     res.json({ success: true, message: 'Expense deleted' });
@@ -79,3 +83,4 @@ expensesRouter.delete('/:id', async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   }
 });
+

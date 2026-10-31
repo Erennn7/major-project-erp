@@ -40,6 +40,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     }
   };
 
+  const handleDemoLogin = async (demoEmail: string) => {
+    setEmail(demoEmail);
+    setPassword('password123');
+    setIsLogin(true);
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await api.login({ email: demoEmail, password: 'password123' });
+      setStoredToken(res.token);
+      localStorage.setItem('aquaflow_user', JSON.stringify(res.user));
+      onAuthSuccess(res.user);
+    } catch (err: any) {
+      setError(err.message || 'Demo login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div
       style={{
@@ -54,14 +72,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       <div
         style={{
           width: '100%',
-          maxWidth: '440px',
+          maxWidth: '460px',
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border)',
           borderRadius: '8px',
-          padding: '32px 28px',
+          padding: '28px 24px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '24px',
+          gap: '20px',
           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
         }}
       >
@@ -88,6 +106,62 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
               Packaged Water B2B Distribution & Margin Management
             </p>
+          </div>
+        </div>
+
+        {/* Quick Demo Role Picker */}
+        <div
+          style={{
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            borderRadius: '6px',
+            padding: '12px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            ⚡ 1-Click Role-Based Demo Login
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '11px', justifyContent: 'flex-start', padding: '6px 8px' }}
+              onClick={() => handleDemoLogin('admin@aquaflow.local')}
+              disabled={loading}
+            >
+              <span>👑</span>
+              <span style={{ fontWeight: 600 }}>Admin Owner</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '11px', justifyContent: 'flex-start', padding: '6px 8px' }}
+              onClick={() => handleDemoLogin('dispatcher@aquaflow.local')}
+              disabled={loading}
+            >
+              <span>🚚</span>
+              <span style={{ fontWeight: 600 }}>Dispatcher</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '11px', justifyContent: 'flex-start', padding: '6px 8px' }}
+              onClick={() => handleDemoLogin('sales@aquaflow.local')}
+              disabled={loading}
+            >
+              <span>💼</span>
+              <span style={{ fontWeight: 600 }}>Sales Rep</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: '11px', justifyContent: 'flex-start', padding: '6px 8px' }}
+              onClick={() => handleDemoLogin('accountant@aquaflow.local')}
+              disabled={loading}
+            >
+              <span>📊</span>
+              <span style={{ fontWeight: 600 }}>Accountant</span>
+            </button>
           </div>
         </div>
 
@@ -161,7 +235,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {!isLogin && (
             <div className="form-group">
               <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -187,7 +261,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             <input
               type="email"
               className="form-input"
-              placeholder="e.g. admin@waterdistribution.local"
+              placeholder="e.g. admin@aquaflow.local"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -232,7 +306,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             type="submit"
             className="btn btn-primary"
             disabled={loading}
-            style={{ width: '100%', marginTop: '8px', padding: '10px' }}
+            style={{ width: '100%', marginTop: '6px', padding: '10px' }}
           >
             <span>{loading ? 'Authenticating...' : isLogin ? 'Sign In to Portal' : 'Create & Launch Account'}</span>
             <ArrowRight size={14} />
@@ -240,9 +314,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         </form>
 
         <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-dim)' }}>
-          Secured with Bcrypt & JWT • Neon Cloud PostgreSQL
+          Enterprise Cloud Security • Encrypted Session Protection
         </div>
       </div>
     </div>
   );
 };
+

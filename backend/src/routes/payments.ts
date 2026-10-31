@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const paymentsRouter = Router();
+
+// Payment ledgers and payment recording are restricted to ADMIN & ACCOUNTANT
+paymentsRouter.use(authenticateToken, requireRoles('ADMIN', 'ACCOUNTANT'));
 
 // GET recent payments
 paymentsRouter.get('/', async (req, res) => {

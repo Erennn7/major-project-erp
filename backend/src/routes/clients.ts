@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { invalidateBootstrapCache } from './bootstrap';
+import { authenticateToken, requireRoles } from '../middleware/auth';
 
 export const clientsRouter = Router();
 
-// GET all clients
+// Base auth
+clientsRouter.use(authenticateToken);
+
+// GET all clients (All authenticated roles)
 clientsRouter.get('/', async (req, res) => {
   try {
     const clients = await prisma.client.findMany({
@@ -15,6 +19,16 @@ clientsRouter.get('/', async (req, res) => {
       },
       orderBy: { name: 'asc' },
     });
+
+    if (req.user?.role === 'DISPATCHER') {
+      const sanitized = clients.map((c) => ({
+        ...c,
+        currentBalance: 0,
+        creditLimit: 0,
+      }));
+      return res.json({ success: true, data: sanitized });
+    }
+
     res.json({ success: true, data: clients });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -24,7 +38,7 @@ clientsRouter.get('/', async (req, res) => {
 // GET single client by ID with deep order and jar history
 clientsRouter.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const client = await prisma.client.findUnique({
       where: { id },
       include: {
@@ -52,14 +66,24 @@ clientsRouter.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Client not found' });
     }
 
+    if (req.user?.role === 'DISPATCHER') {
+      const sanitized = {
+        ...client,
+        currentBalance: 0,
+        creditLimit: 0,
+        payments: [],
+      };
+      return res.json({ success: true, data: sanitized });
+    }
+
     res.json({ success: true, data: client });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// POST new client
-clientsRouter.post('/', async (req, res) => {
+// POST new client (ADMIN & SALES)
+clientsRouter.post('/', requireRoles('ADMIN', 'SALES'), async (req, res) => {
   try {
     const {
       name,
@@ -111,10 +135,10 @@ clientsRouter.post('/', async (req, res) => {
   }
 });
 
-// PUT update client
-clientsRouter.put('/:id', async (req, res) => {
+// PUT update client (ADMIN & SALES)
+clientsRouter.put('/:id', requireRoles('ADMIN', 'SALES'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const {
       name,
       clientType,
@@ -151,10 +175,10 @@ clientsRouter.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE client
-clientsRouter.delete('/:id', async (req, res) => {
+// DELETE client (strictly ADMIN)
+clientsRouter.delete('/:id', requireRoles('ADMIN'), async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     await prisma.client.delete({ where: { id } });
     invalidateBootstrapCache();
     res.json({ success: true, message: 'Client deleted' });
@@ -162,3 +186,4 @@ clientsRouter.delete('/:id', async (req, res) => {
     res.status(400).json({ success: false, error: error.message });
   }
 });
+
