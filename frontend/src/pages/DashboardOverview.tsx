@@ -54,7 +54,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-main)' }}>
-              Classroom Aqua Bottlers & Distribution
+               Aqua Bottlers & Distribution
             </h2>
             <span className="badge badge-neutral" style={{ fontSize: '10px' }}>
               {userRole} WORKSPACE
